@@ -1,0 +1,43 @@
+name: windows-build
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Smoke test
+        run: python scripts/smoke_test.py
+
+      - name: Build desktop
+        run: dotnet build apps/desktop/FightingOverlay.Desktop.csproj -c Release
+
+      - name: Package artifact
+        run: |
+          $dist = Join-Path $env:GITHUB_WORKSPACE "dist"
+          $app = Join-Path $dist "FightingOverlay"
+          New-Item -ItemType Directory -Force -Path $app | Out-Null
+          Copy-Item -Recurse -Force (Join-Path $env:GITHUB_WORKSPACE "apps/desktop/bin/Release/net8.0-windows/") $app
+          Copy-Item -Recurse -Force (Join-Path $env:GITHUB_WORKSPACE "engine") (Join-Path $app "engine")
+          Copy-Item -Recurse -Force (Join-Path $env:GITHUB_WORKSPACE "shared") (Join-Path $app "shared")
+          Compress-Archive -Path $app -DestinationPath (Join-Path $dist "FightingOverlay.zip")
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: FightingOverlay
+          path: dist/FightingOverlay.zip

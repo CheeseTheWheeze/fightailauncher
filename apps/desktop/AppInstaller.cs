@@ -6,44 +6,84 @@ namespace FightingOverlay.Desktop;
 
 public static class AppInstaller
 {
-    public static bool EnsureInstalled()
+    public static InstallResult EnsureInstalled()
     {
-        var baseDir = Path.GetFullPath(AppDomain.CurrentDomain.BaseDirectory);
-        var currentDir = Path.GetFullPath(AppPaths.CurrentDir());
-
-        if (baseDir.StartsWith(currentDir + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+        try
         {
-            return false;
+            var baseDir = Path.GetFullPath(AppDomain.CurrentDomain.BaseDirectory);
+            var currentDir = Path.GetFullPath(AppPaths.CurrentDir());
+
+            if (baseDir.StartsWith(currentDir + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            {
+                return new InstallResult(false, false, null);
+            }
+
+            var version = VersionInfo.ReadVersion();
+            var targetDir = Path.Combine(AppPaths.VersionsDir(), version);
+            Directory.CreateDirectory(AppPaths.VersionsDir());
+
+            if (!Directory.Exists(targetDir))
+            {
+                CopyDirectory(baseDir, targetDir);
+            }
+
+            var junctionResult = CreateJunction(AppPaths.CurrentDir(), targetDir);
+            if (!junctionResult.Success)
+            {
+                return new InstallResult(true, false, junctionResult.ErrorMessage);
+            }
+
+            var exeName = Path.GetFileName(Process.GetCurrentProcess().MainModule?.FileName ?? "FightAILauncher.exe");
+            var targetExe = Path.Combine(targetDir, exeName);
+            if (!File.Exists(targetExe))
+            {
+                var message = $"Target executable not found at {targetExe}";
+                DesktopLogger.Log(message);
+                return new InstallResult(true, false, message);
+            }
+
+            try
+            {
+                var process = Process.Start(new ProcessStartInfo
+                {
+                    FileName = targetExe,
+                    WorkingDirectory = targetDir,
+                    UseShellExecute = true
+                });
+                if (process == null)
+                {
+                    var message = "Process.Start returned null during relaunch.";
+                    DesktopLogger.Log(message);
+                    return new InstallResult(true, false, message);
+                }
+            }
+            catch (Exception ex)
+            {
+                DesktopLogger.Log($"Failed to relaunch: {ex}");
+                return new InstallResult(true, false, ex.Message);
+            }
+
+            return new InstallResult(true, true, null);
         }
-
-        var version = VersionInfo.ReadVersion();
-        var targetDir = Path.Combine(AppPaths.VersionsDir(), version);
-        Directory.CreateDirectory(AppPaths.VersionsDir());
-
-        if (!Directory.Exists(targetDir))
+        catch (Exception ex)
         {
-            CopyDirectory(baseDir, targetDir);
+            DesktopLogger.Log($"EnsureInstalled failed: {ex}");
+            return new InstallResult(true, false, ex.Message);
         }
-
-        CreateJunction(AppPaths.CurrentDir(), targetDir);
-
-        var exeName = Path.GetFileName(Process.GetCurrentProcess().MainModule?.FileName ?? "FightAILauncher.exe");
-        var targetExe = Path.Combine(targetDir, exeName);
-        Process.Start(new ProcessStartInfo
-        {
-            FileName = targetExe,
-            WorkingDirectory = targetDir,
-            UseShellExecute = true
-        });
-
-        return true;
     }
 
-    private static void CreateJunction(string junctionPath, string targetPath)
+    private static JunctionResult CreateJunction(string junctionPath, string targetPath)
     {
         if (Directory.Exists(junctionPath))
         {
-            Directory.Delete(junctionPath);
+            try
+            {
+                Directory.Delete(junctionPath, recursive: true);
+            }
+            catch
+            {
+                DesktopLogger.Log($"Failed to delete existing junction at {junctionPath}.");
+            }
         }
 
         var startInfo = new ProcessStartInfo
@@ -54,7 +94,22 @@ public static class AppInstaller
             UseShellExecute = false
         };
         using var process = Process.Start(startInfo);
-        process?.WaitForExit();
+        if (process == null)
+        {
+            var message = "Failed to start mklink process.";
+            DesktopLogger.Log(message);
+            return new JunctionResult(false, message);
+        }
+
+        process.WaitForExit();
+        if (process.ExitCode != 0)
+        {
+            var message = $"mklink exited with code {process.ExitCode}.";
+            DesktopLogger.Log(message);
+            return new JunctionResult(false, message);
+        }
+
+        return new JunctionResult(true, null);
     }
 
     private static void CopyDirectory(string sourceDir, string targetDir)
@@ -73,3 +128,7 @@ public static class AppInstaller
         }
     }
 }
+
+public record InstallResult(bool DidInstallAttempt, bool RelaunchStarted, string? ErrorMessage);
+
+public record JunctionResult(bool Success, string? ErrorMessage);

@@ -10,7 +10,6 @@ namespace FightingOverlay.Desktop;
 
 public partial class MainWindow : Window
 {
-    private readonly string _desktopLogPath;
     private string? _lastOutputDir;
     private string? _lastLogsDir;
     private readonly UpdateService _updateService = new();
@@ -20,9 +19,9 @@ public partial class MainWindow : Window
         InitializeComponent();
         Directory.CreateDirectory(StoragePaths.BaseDataDir());
         Directory.CreateDirectory(StoragePaths.LogsDir());
-        _desktopLogPath = Path.Combine(StoragePaths.LogsDir(), "desktop.log");
         LoadProfiles();
         LoadVersion();
+        LoadDiagnostics();
     }
 
     private void LoadProfiles()
@@ -58,6 +57,39 @@ public partial class MainWindow : Window
         {
             AppendLog($"Failed to read version: {ex.Message}");
         }
+    }
+
+    private void LoadDiagnostics()
+    {
+        try
+        {
+            AppVersionText.Text = $"App version: {VersionInfo.ReadVersion()}";
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"Failed to read app version: {ex.Message}");
+        }
+
+        BaseDirText.Text = $"Running from: {AppDomain.CurrentDomain.BaseDirectory}";
+        InstalledDirText.Text = $"Installed current dir: {AppPaths.CurrentDir()}";
+        LatestVersionText.Text = $"Latest pointer: {ReadLatestVersion()}";
+    }
+
+    private static string ReadLatestVersion()
+    {
+        try
+        {
+            var latestPath = Path.Combine(AppPaths.VersionsDir(), "latest.txt");
+            if (File.Exists(latestPath))
+            {
+                return File.ReadAllText(latestPath).Trim();
+            }
+        }
+        catch
+        {
+        }
+
+        return "unknown";
     }
 
     private void OnBrowseVideo(object sender, RoutedEventArgs e)
@@ -117,7 +149,8 @@ public partial class MainWindow : Window
         var engineInfo = EngineLocator.ResolveEngine();
         if (engineInfo == null)
         {
-            MessageBox.Show("Engine not found. Set FIGHTING_OVERLAY_ENGINE_PATH.");
+            DesktopLogger.Log("Engine not found. Set FIGHTING_OVERLAY_ENGINE_PATH or install engine.");
+            ShowEngineMissingDialog();
             return;
         }
 
@@ -235,7 +268,7 @@ public partial class MainWindow : Window
 
     private void OnOpenLogs(object sender, RoutedEventArgs e)
     {
-        var logsDir = _lastLogsDir ?? StoragePaths.LogsDir();
+        var logsDir = _lastLogsDir ?? DesktopLogger.LogDirectory;
         Process.Start(new ProcessStartInfo("explorer.exe", logsDir) { UseShellExecute = true });
     }
 
@@ -246,7 +279,25 @@ public partial class MainWindow : Window
             LogTextBox.AppendText(message + Environment.NewLine);
             LogTextBox.ScrollToEnd();
         });
-        File.AppendAllText(_desktopLogPath, message + Environment.NewLine);
+        DesktopLogger.Log(message);
+    }
+
+    private void ShowEngineMissingDialog()
+    {
+        var result = MessageBox.Show(
+            "Engine not found. The UI will stay open, but analysis cannot run.\n\nYes = Open Logs Folder\nNo = Open App Folder",
+            "Engine Missing",
+            MessageBoxButton.YesNoCancel,
+            MessageBoxImage.Error);
+
+        if (result == MessageBoxResult.Yes)
+        {
+            DesktopLogger.OpenLogsFolder();
+        }
+        else if (result == MessageBoxResult.No)
+        {
+            Process.Start(new ProcessStartInfo("explorer.exe", AppDomain.CurrentDomain.BaseDirectory) { UseShellExecute = true });
+        }
     }
 
     private record ProfileItem(string Id, string Name)

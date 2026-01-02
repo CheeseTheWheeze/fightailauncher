@@ -14,10 +14,9 @@ def base_data_dir() -> Path:
 
 
 @dataclass(frozen=True)
-class ClipPaths:
+class RunPaths:
     base_dir: Path
-    profile_dir: Path
-    clip_dir: Path
+    run_dir: Path
     input_dir: Path
     outputs_dir: Path
     logs_dir: Path
@@ -27,35 +26,39 @@ class ClipPaths:
 class GlobalPaths:
     base_dir: Path
     logs_dir: Path
+    profiles_pool_dir: Path
+    profiles_pool_path: Path
 
 
 def get_global_paths() -> GlobalPaths:
     base_dir = base_data_dir()
+    profiles_pool_dir = base_dir / "profiles_pool"
     return GlobalPaths(
         base_dir=base_dir,
         logs_dir=base_dir / "logs",
+        profiles_pool_dir=profiles_pool_dir,
+        profiles_pool_path=profiles_pool_dir / "profiles.json",
     )
 
 
-def get_clip_paths(athlete_id: str, clip_id: str) -> ClipPaths:
+def get_run_paths(run_id: str) -> RunPaths:
     base_dir = base_data_dir()
-    profile_dir = base_dir / "profiles" / athlete_id
-    clip_dir = profile_dir / "clips" / clip_id
-    return ClipPaths(
+    run_dir = base_dir / "runs" / run_id
+    return RunPaths(
         base_dir=base_dir,
-        profile_dir=profile_dir,
-        clip_dir=clip_dir,
-        input_dir=clip_dir / "input",
-        outputs_dir=clip_dir / "outputs",
-        logs_dir=clip_dir / "logs",
+        run_dir=run_dir,
+        input_dir=run_dir / "input",
+        outputs_dir=run_dir / "outputs",
+        logs_dir=run_dir / "logs",
     )
 
 
-def ensure_clip_dirs(clip_paths: ClipPaths) -> None:
-    clip_paths.input_dir.mkdir(parents=True, exist_ok=True)
-    clip_paths.outputs_dir.mkdir(parents=True, exist_ok=True)
-    clip_paths.logs_dir.mkdir(parents=True, exist_ok=True)
+def ensure_run_dirs(run_paths: RunPaths) -> None:
+    run_paths.input_dir.mkdir(parents=True, exist_ok=True)
+    run_paths.outputs_dir.mkdir(parents=True, exist_ok=True)
+    run_paths.logs_dir.mkdir(parents=True, exist_ok=True)
 
 
 def ensure_global_dirs(global_paths: GlobalPaths) -> None:
     global_paths.logs_dir.mkdir(parents=True, exist_ok=True)
+    global_paths.profiles_pool_dir.mkdir(parents=True, exist_ok=True)

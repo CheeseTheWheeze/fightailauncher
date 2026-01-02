@@ -13,3 +13,9 @@ Track recurring failures and mitigations to avoid regressions.
 - **Root cause:** Install detection used `BaseDirectory`; junction removal was non-deterministic; mklink stderr was not logged.
 - **Fix:** Use `MainModule` exe path, deterministic rmdir/rename, capture mklink stdout/stderr, install_failed marker backoff.
 - **Prevention:** Never use `BaseDirectory` for install path; always log mklink stdout/stderr; back off on repeated failures.
+
+## 2025-02-18
+- **Symptom:** Overlay contained no skeleton.
+- **Root cause:** Overlay renderer copied video; pose extractor defaulted to stub output when MediaPipe was missing.
+- **Fix:** Implement real MediaPipe pose extraction, draw skeleton overlays, and fail loudly if MediaPipe is missing.
+- **Prevention:** Keep pose extraction as required dependency and ensure overlay renderer always draws joints/bones.

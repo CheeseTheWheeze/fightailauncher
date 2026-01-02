@@ -13,29 +13,26 @@ public static class StoragePaths
         return Path.Combine(localAppData, AppName, "data");
     }
 
-    public static string ProfilesDir() => Path.Combine(BaseDataDir(), "profiles");
+    public static string RunsDir() => Path.Combine(BaseDataDir(), "runs");
 
     public static string LogsDir() => Path.Combine(BaseDataDir(), "logs");
 
-    public static ClipPaths GetClipPaths(string athleteId, string clipId)
+    public static RunPaths GetRunPaths(string runId)
     {
-        var profileDir = Path.Combine(ProfilesDir(), athleteId);
-        var clipDir = Path.Combine(profileDir, "clips", clipId);
-        return new ClipPaths(
+        var runDir = Path.Combine(RunsDir(), runId);
+        return new RunPaths(
             BaseDataDir(),
-            profileDir,
-            clipDir,
-            Path.Combine(clipDir, "input"),
-            Path.Combine(clipDir, "outputs"),
-            Path.Combine(clipDir, "logs")
+            runDir,
+            Path.Combine(runDir, "input"),
+            Path.Combine(runDir, "outputs"),
+            Path.Combine(runDir, "logs")
         );
     }
 }
 
-public record ClipPaths(
+public record RunPaths(
     string BaseDir,
-    string ProfileDir,
-    string ClipDir,
+    string RunDir,
     string InputDir,
     string OutputsDir,
     string LogsDir

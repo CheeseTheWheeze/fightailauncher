@@ -4,7 +4,8 @@ from pathlib import Path
 from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs
 
 
-repo_root = Path(__file__).resolve().parents[1]
+spec_dir = Path(SPECPATH).resolve()
+repo_root = spec_dir.parent
 
 datas = collect_data_files("imageio_ffmpeg")
 binaries = collect_dynamic_libs("imageio_ffmpeg")

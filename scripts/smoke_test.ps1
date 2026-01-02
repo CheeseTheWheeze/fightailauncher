@@ -35,10 +35,14 @@ try {
     }
 
     $runId = "smoke-run"
-    $outputDir = Join-Path $tempRoot "outputs"
+    $runRoot = Join-Path $tempRoot "run"
+    $outputDir = Join-Path $runRoot "outputs"
+    $logDir = Join-Path $runRoot "logs"
+    $modelPath = Join-Path (Split-Path $EnginePath -Parent) "models" "pose_landmarker_full.task"
 
     $resultJson = Join-Path $outputDir "result.json"
-    & $EnginePath analyze --video $videoPath --run-id $runId --outdir $outputDir
+    $engineLog = Join-Path $logDir "engine.log"
+    & $EnginePath analyze --video $videoPath --run-id $runId --outdir $runRoot --model $modelPath
     if ($LASTEXITCODE -ne 0) {
         Write-Error "Engine exited with non-zero."
         exit 1
@@ -46,6 +50,10 @@ try {
 
     if (-not (Test-Path $resultJson)) {
         Write-Error "result.json missing"
+        exit 1
+    }
+    if (-not (Test-Path $engineLog)) {
+        Write-Error "engine.log missing"
         exit 1
     }
 
@@ -84,6 +92,11 @@ try {
         Write-Error "pose.json missing"
         exit 1
     }
+    $poseRawJson = Join-Path $outputDir "pose_raw.json"
+    if (-not (Test-Path $poseRawJson)) {
+        Write-Error "pose_raw.json missing"
+        exit 1
+    }
 
     $posePayload = Get-Content $poseJson -Raw | ConvertFrom-Json
     if (-not $posePayload.frames -or $posePayload.frames.Count -eq 0) {
@@ -93,10 +106,12 @@ try {
     Write-Host ("pose.json frame count: {0}" -f $posePayload.frames.Count)
 
     $negativeRunId = "smoke-run-missing"
-    $negativeOutputDir = Join-Path $tempRoot "outputs-missing"
+    $negativeRunRoot = Join-Path $tempRoot "run-missing"
+    $negativeOutputDir = Join-Path $negativeRunRoot "outputs"
+    $negativeLogDir = Join-Path $negativeRunRoot "logs"
     $missingVideo = Join-Path $tempRoot "does-not-exist.mp4"
 
-    & $EnginePath analyze --video $missingVideo --run-id $negativeRunId --outdir $negativeOutputDir
+    & $EnginePath analyze --video $missingVideo --run-id $negativeRunId --outdir $negativeRunRoot --model $modelPath
     if ($LASTEXITCODE -ne 2) {
         Write-Error "Engine missing-video run exited with $LASTEXITCODE (expected 2)."
         exit 1
@@ -105,6 +120,11 @@ try {
     $negativeResult = Join-Path $negativeOutputDir "result.json"
     if (-not (Test-Path $negativeResult)) {
         Write-Error "result.json missing for negative test"
+        exit 1
+    }
+    $negativeLog = Join-Path $negativeLogDir "engine.log"
+    if (-not (Test-Path $negativeLog)) {
+        Write-Error "engine.log missing for negative test"
         exit 1
     }
 
@@ -116,6 +136,26 @@ try {
 
     if ($negativePayload.error.code -ne "E_VIDEO_MISSING") {
         Write-Error "negative result.json error.code not E_VIDEO_MISSING"
+        exit 1
+    }
+
+    $argFailRunRoot = Join-Path $tempRoot "run-argfail"
+    $argFailOutputDir = Join-Path $argFailRunRoot "outputs"
+    $argFailLogDir = Join-Path $argFailRunRoot "logs"
+    & $EnginePath analyze --video $videoPath --run-id "argfail" --outdir $argFailRunRoot --bad-flag
+    if ($LASTEXITCODE -ne 2) {
+        Write-Error "Engine invalid-arg run exited with $LASTEXITCODE (expected 2)."
+        exit 1
+    }
+
+    $argFailResult = Join-Path $argFailOutputDir "result.json"
+    $argFailLog = Join-Path $argFailLogDir "engine.log"
+    if (-not (Test-Path $argFailResult)) {
+        Write-Error "result.json missing for invalid-arg test"
+        exit 1
+    }
+    if (-not (Test-Path $argFailLog)) {
+        Write-Error "engine.log missing for invalid-arg test"
         exit 1
     }
 

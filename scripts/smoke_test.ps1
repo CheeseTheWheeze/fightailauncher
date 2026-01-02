@@ -17,7 +17,22 @@ New-Item -ItemType Directory -Force -Path $tempRoot | Out-Null
 
 try {
     $videoPath = Join-Path $tempRoot "test.mp4"
+    Write-Host "Generating test video at: $videoPath"
     python (Join-Path $repoRoot "scripts\generate_test_video.py") --output $videoPath
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "generate_test_video.py failed with exit code $LASTEXITCODE"
+        exit 1
+    }
+
+    if (-not (Test-Path $videoPath)) {
+        Write-Error "Test video not found at $videoPath"
+        exit 1
+    }
+
+    if ((Get-Item $videoPath).Length -le 0) {
+        Write-Error "Test video is empty at $videoPath"
+        exit 1
+    }
 
     $athleteId = "smoke-athlete"
     $clipId = "smoke-clip"

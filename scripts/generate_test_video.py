@@ -1,28 +1,30 @@
 import argparse
+import subprocess
+import sys
 from pathlib import Path
 
-import cv2
-import numpy as np
+from imageio_ffmpeg import get_ffmpeg_exe
 
 
 def generate_video(path: Path, width: int, height: int, fps: int, seconds: int) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-    writer = cv2.VideoWriter(str(path), fourcc, fps, (width, height))
-    frame_count = fps * seconds
-    for i in range(frame_count):
-        frame = np.zeros((height, width, 3), dtype=np.uint8)
-        cv2.putText(
-            frame,
-            f"Frame {i}",
-            (10, height // 2),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.6,
-            (0, 255, 0),
-            2,
-        )
-        writer.write(frame)
-    writer.release()
+    ffmpeg = get_ffmpeg_exe()
+    command = [
+        ffmpeg,
+        "-y",
+        "-f",
+        "lavfi",
+        "-i",
+        f"color=c=black:s={width}x{height}:d={seconds}:r={fps}",
+        "-pix_fmt",
+        "yuv420p",
+        str(path),
+    ]
+    result = subprocess.run(command, capture_output=True, text=True)
+    if result.returncode != 0:
+        sys.stderr.write("ffmpeg failed to generate test video.\n")
+        sys.stderr.write(result.stderr)
+        raise SystemExit(result.returncode)
 
 
 def main() -> None:

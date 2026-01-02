@@ -5,6 +5,7 @@ import shutil
 import sys
 import time
 import traceback
+import uuid
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -14,7 +15,6 @@ if str(REPO_ROOT) not in sys.path:
 from engine.errors import KnownError  # noqa: E402
 from engine.overlay import render_overlay  # noqa: E402
 from engine.pose import extract_pose  # noqa: E402
-from engine.profile_pool import assign_tracks_to_profiles  # noqa: E402
 from engine.result_contract import (  # noqa: E402
     ResultStatus,
     safe_write_json,
@@ -58,8 +58,8 @@ def read_version() -> str:
     return "unknown"
 
 
-def resolve_outputs_logs(args: argparse.Namespace):
-    run_paths = get_run_paths(args.run_id)
+def resolve_outputs_logs(run_id: str, args: argparse.Namespace):
+    run_paths = get_run_paths(run_id)
     ensure_run_dirs(run_paths)
 
     outputs_dir = Path(args.outdir) if args.outdir else run_paths.outputs_dir
@@ -75,7 +75,8 @@ def resolve_outputs_logs(args: argparse.Namespace):
 
 def analyze(args: argparse.Namespace) -> int:
     started = time.time()
-    run_paths, outputs_dir, logs_dir = resolve_outputs_logs(args)
+    run_id = args.run_id or uuid.uuid4().hex
+    run_paths, outputs_dir, logs_dir = resolve_outputs_logs(run_id, args)
     global_paths = get_global_paths()
     ensure_global_dirs(global_paths)
 
@@ -86,12 +87,12 @@ def analyze(args: argparse.Namespace) -> int:
     video_path = Path(args.video)
     result = {
         "status": ResultStatus.ERROR,
-        "run_id": args.run_id,
+        "run_id": run_id,
         "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "version": read_version(),
         "inputs": {
             "video": str(video_path),
-            "run_id": args.run_id,
+            "run_id": run_id,
         },
         "outputs": {
             "overlay_mp4": "overlay.mp4",
@@ -104,13 +105,12 @@ def analyze(args: argparse.Namespace) -> int:
             "engine_log": "engine.log",
             "logs_dir": str(logs_dir),
         },
-        "assigned_profiles": [],
         "warnings": [],
     }
 
     exit_code = 3
     try:
-        logger.info("Starting analysis for run_id=%s", args.run_id)
+        logger.info("Starting analysis for run_id=%s", run_id)
 
         if not video_path.exists():
             raise KnownError(
@@ -132,11 +132,8 @@ def analyze(args: argparse.Namespace) -> int:
 
         pose_result = extract_pose(video_path, outputs_dir, logger)
         overlay_result = render_overlay(video_path, outputs_dir, logger)
-        assigned_profiles = assign_tracks_to_profiles(video_path, outputs_dir / "pose.json", logger)
-
         result["outputs"]["pose_json"] = _relative_to(outputs_dir, pose_result["pose_path"])
         result["outputs"]["overlay_mp4"] = _relative_to(outputs_dir, overlay_result["overlay_path"])
-        result["assigned_profiles"] = assigned_profiles
         result["timings_ms"] = {
             "total": int((time.time() - started) * 1000),
             "pose": pose_result["pose_duration_ms"],
@@ -196,7 +193,7 @@ def main() -> int:
 
     analyze_parser = subparsers.add_parser("analyze", help="Analyze a video")
     analyze_parser.add_argument("--video", required=True)
-    analyze_parser.add_argument("--run-id", required=True)
+    analyze_parser.add_argument("--run-id", required=False)
     analyze_parser.add_argument("--outdir", required=False)
     analyze_parser.add_argument("--model", required=False)
 

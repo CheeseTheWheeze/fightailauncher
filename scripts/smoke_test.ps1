@@ -54,6 +54,10 @@ try {
         Write-Error "result.json status not ok"
         exit 1
     }
+    if ($payload.overlay.status -ne "ok") {
+        Write-Error "result.json overlay status not ok"
+        exit 1
+    }
 
     $overlay = Join-Path $outputDir "overlay.mp4"
     if (-not (Test-Path $overlay)) {
@@ -73,14 +77,19 @@ try {
     }
 
     $posePayload = Get-Content $poseJson -Raw | ConvertFrom-Json
-    if (-not $posePayload.tracks -or $posePayload.tracks.Count -eq 0) {
-        Write-Error "pose.json tracks empty"
+    if (-not $posePayload.frames -or $posePayload.frames.Count -eq 0) {
+        Write-Error "pose.json frames empty"
         exit 1
     }
 
-    $firstTrack = $posePayload.tracks[0]
-    if (-not $firstTrack.frames -or $firstTrack.frames.Count -eq 0) {
-        Write-Error "pose.json frames empty"
+    $landmarkCount = 0
+    foreach ($frame in $posePayload.frames) {
+        if ($frame.landmarks) {
+            $landmarkCount += $frame.landmarks.Count
+        }
+    }
+    if ($landmarkCount -le 0) {
+        Write-Error "pose.json landmarks missing"
         exit 1
     }
 

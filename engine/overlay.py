@@ -16,12 +16,21 @@ def render_overlay(video_path: Path, outputs_dir: Path, logger) -> dict:
             "OpenCV import failed.",
             "Engine bundle may be missing OpenCV DLLs. Use the Release zip; do not run from source.",
         ) from exc
+    try:
+        import mediapipe as mp
+        from mediapipe.framework.formats import landmark_pb2
+    except Exception as exc:
+        raise KnownError(
+            "E_MEDIAPIPE_MISSING",
+            "MediaPipe is required for overlay rendering.",
+            "This release is missing mediapipe in engine.exe; rebuild release.",
+        ) from exc
 
     if not pose_path.exists():
         raise KnownError("E_POSE_MISSING", "pose.json missing.", "Run pose extraction before overlay rendering.")
 
     pose_data = json.loads(pose_path.read_text())
-    tracks = pose_data.get("tracks", [])
+    frames = pose_data.get("frames", [])
 
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
@@ -38,29 +47,17 @@ def render_overlay(video_path: Path, outputs_dir: Path, logger) -> dict:
         raise KnownError("E_OVERLAY_WRITE", "Failed to open overlay writer.", "Check codec availability.")
 
     frame_map: dict[int, list[dict]] = {}
-    track_colors = {}
-    for idx, track in enumerate(tracks):
-        track_id = track.get("track_id")
-        track_colors[track_id] = idx
-        for frame in track.get("frames", []):
-            frame_index = frame.get("frame_index")
-            if frame_index is None:
-                continue
-            frame_map.setdefault(frame_index, []).append(
-                {
-                    "track_id": track_id,
-                    "landmarks": frame.get("landmarks", []),
-                }
-            )
+    for frame in frames:
+        frame_index = frame.get("frame_index")
+        if frame_index is None:
+            continue
+        frame_map.setdefault(frame_index, []).append(frame)
 
-    connections = _pose_connections()
-    color_palette = [
-        (0, 255, 255),
-        (255, 0, 255),
-        (255, 255, 0),
-        (0, 255, 0),
-        (0, 128, 255),
-    ]
+    mp_pose = mp.solutions.pose
+    drawing_utils = mp.solutions.drawing_utils
+    drawing_styles = mp.solutions.drawing_styles
+    name_to_index = {landmark.name: landmark.value for landmark in mp_pose.PoseLandmark}
+    drawn_frames = 0
 
     frame_index = 0
     while True:
@@ -69,10 +66,17 @@ def render_overlay(video_path: Path, outputs_dir: Path, logger) -> dict:
             break
 
         for track_frame in frame_map.get(frame_index, []):
-            track_id = track_frame.get("track_id")
-            color_index = track_colors.get(track_id, 0)
-            color = color_palette[color_index % len(color_palette)]
-            _draw_skeleton(frame, track_frame.get("landmarks", []), connections, color)
+            landmarks = track_frame.get("landmarks", [])
+            if not landmarks:
+                continue
+            landmark_list = _build_landmark_list(landmarks, name_to_index, landmark_pb2)
+            drawing_utils.draw_landmarks(
+                frame,
+                landmark_list,
+                mp_pose.POSE_CONNECTIONS,
+                drawing_styles.get_default_pose_landmarks_style(),
+            )
+            drawn_frames += 1
 
         writer.write(frame)
         frame_index += 1
@@ -80,53 +84,29 @@ def render_overlay(video_path: Path, outputs_dir: Path, logger) -> dict:
     cap.release()
     writer.release()
 
-    return {"overlay_path": str(overlay_path), "overlay_status": "rendered"}
+    return {"overlay_path": str(overlay_path), "overlay_status": "ok" if drawn_frames > 0 else "no_pose"}
 
 
-def _pose_connections() -> list[tuple[str, str]]:
-    try:
-        from mediapipe.solutions.pose import POSE_CONNECTIONS, PoseLandmark
-
-        name_map = {landmark.value: landmark.name for landmark in PoseLandmark}
-        return [(name_map[a], name_map[b]) for a, b in POSE_CONNECTIONS]
-    except Exception:
-        return [
-            ("LEFT_SHOULDER", "RIGHT_SHOULDER"),
-            ("LEFT_SHOULDER", "LEFT_ELBOW"),
-            ("LEFT_ELBOW", "LEFT_WRIST"),
-            ("RIGHT_SHOULDER", "RIGHT_ELBOW"),
-            ("RIGHT_ELBOW", "RIGHT_WRIST"),
-            ("LEFT_SHOULDER", "LEFT_HIP"),
-            ("RIGHT_SHOULDER", "RIGHT_HIP"),
-            ("LEFT_HIP", "RIGHT_HIP"),
-            ("LEFT_HIP", "LEFT_KNEE"),
-            ("LEFT_KNEE", "LEFT_ANKLE"),
-            ("RIGHT_HIP", "RIGHT_KNEE"),
-            ("RIGHT_KNEE", "RIGHT_ANKLE"),
-        ]
-
-
-def _draw_skeleton(frame, landmarks: list[dict], connections: list[tuple[str, str]], color: tuple[int, int, int]):
-    import cv2
-
-    if not landmarks:
-        return
-
-    height, width = frame.shape[:2]
-    points = {}
-    for lm in landmarks:
-        name = lm.get("name")
-        if name is None:
+def _build_landmark_list(landmarks: list[dict], name_to_index: dict[str, int], landmark_pb2):
+    ordered = [None] * (max(name_to_index.values()) + 1 if name_to_index else len(landmarks))
+    for landmark in landmarks:
+        name = landmark.get("name")
+        if not name:
             continue
-        x = lm.get("x")
-        y = lm.get("y")
-        if x is None or y is None:
+        idx = name_to_index.get(name)
+        if idx is None:
             continue
-        px = int(x * width)
-        py = int(y * height)
-        points[name] = (px, py)
-        cv2.circle(frame, (px, py), 5, color, thickness=-1)
+        ordered[idx] = landmark_pb2.NormalizedLandmark(
+            x=float(landmark.get("x", 0.0)),
+            y=float(landmark.get("y", 0.0)),
+            z=float(landmark.get("z", 0.0)),
+            visibility=float(landmark.get("conf", 0.0) or 0.0),
+        )
 
-    for start, end in connections:
-        if start in points and end in points:
-            cv2.line(frame, points[start], points[end], color, thickness=3)
+    filled = [
+        lm
+        if lm is not None
+        else landmark_pb2.NormalizedLandmark(x=0.0, y=0.0, z=0.0, visibility=0.0)
+        for lm in ordered
+    ]
+    return landmark_pb2.NormalizedLandmarkList(landmark=filled)

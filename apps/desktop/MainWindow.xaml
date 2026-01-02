@@ -51,8 +51,6 @@
             <StackPanel Grid.Column="1">
                 <TextBlock Text="Overlay Preview" FontWeight="Bold" />
                 <MediaElement x:Name="PreviewPlayer" Height="350" LoadedBehavior="Manual" UnloadedBehavior="Stop" />
-                <TextBlock Text="Track Assignments" FontWeight="Bold" Margin="0,12,0,0" />
-                <ListBox x:Name="AssignmentsList" Height="120" />
             </StackPanel>
         </Grid>
 

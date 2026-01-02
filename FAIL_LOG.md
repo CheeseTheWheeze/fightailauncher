@@ -7,3 +7,9 @@ Track recurring failures and mitigations to avoid regressions.
 - **Root cause:** Startup exited during `EnsureInstalled` relaunch path (junction/delete/relaunch failures could throw or fail silently).
 - **Fix:** Make install/relaunch non-fatal, log errors, show GUI even when relaunch fails.
 - **Prevention:** Guard startup/installer paths with logging and fall back to in-place execution.
+
+## 2025-02-16
+- **Symptom:** mklink exited with code 1; launcher opens but warns.
+- **Root cause:** Install detection used `BaseDirectory`; junction removal was non-deterministic; mklink stderr was not logged.
+- **Fix:** Use `MainModule` exe path, deterministic rmdir/rename, capture mklink stdout/stderr, install_failed marker backoff.
+- **Prevention:** Never use `BaseDirectory` for install path; always log mklink stdout/stderr; back off on repeated failures.

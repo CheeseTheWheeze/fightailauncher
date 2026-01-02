@@ -97,6 +97,7 @@ def analyze(args: argparse.Namespace) -> int:
         "outputs": {
             "overlay_mp4": "overlay.mp4",
             "pose_json": "pose.json",
+            "pose_raw_json": "pose_raw.json",
             "result_json": "result.json",
             "error_json": "error.json",
             "outputs_dir": str(outputs_dir),
@@ -130,9 +131,16 @@ def analyze(args: argparse.Namespace) -> int:
         if input_copy.resolve() != video_path.resolve():
             shutil.copyfile(video_path, input_copy)
 
-        pose_result = extract_pose(video_path, outputs_dir, logger)
+        pose_result = extract_pose(
+            video_path,
+            outputs_dir,
+            logger,
+            primary_tracks=args.primary_tracks,
+            model_path=args.model,
+        )
         overlay_result = render_overlay(video_path, outputs_dir, logger)
         result["outputs"]["pose_json"] = _relative_to(outputs_dir, pose_result["pose_path"])
+        result["outputs"]["pose_raw_json"] = _relative_to(outputs_dir, pose_result["pose_raw_path"])
         result["outputs"]["overlay_mp4"] = _relative_to(outputs_dir, overlay_result["overlay_path"])
         result["timings_ms"] = {
             "total": int((time.time() - started) * 1000),
@@ -149,6 +157,10 @@ def analyze(args: argparse.Namespace) -> int:
         result["pose_status"] = pose_result["pose_status"]
         result["overlay_status"] = overlay_result["overlay_status"]
         result["pose_metrics"] = pose_result.get("pose_metrics", {})
+        result["tracking_metrics"] = pose_result.get("tracking_metrics", {})
+        result["raw_detections_per_frame_avg"] = pose_result.get("raw_detections_per_frame_avg", 0.0)
+        result["primary_track_ids"] = pose_result.get("primary_track_ids", [])
+        result["primary_track_count"] = pose_result.get("primary_track_count", args.primary_tracks)
         result["pose_frames_with_detections"] = pose_result.get("pose_frames_with_detections", 0)
         result["overlay_bytes"] = overlay_result.get("overlay_bytes", 0)
 
@@ -207,6 +219,7 @@ def main() -> int:
     analyze_parser.add_argument("--run-id", required=False)
     analyze_parser.add_argument("--outdir", required=False)
     analyze_parser.add_argument("--model", required=False)
+    analyze_parser.add_argument("--primary-tracks", type=int, default=2)
 
     args = parser.parse_args()
 

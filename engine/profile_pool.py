@@ -1,3 +1,5 @@
+import importlib
+import importlib.util
 import json
 import math
 from pathlib import Path
@@ -8,20 +10,20 @@ from shared.storage_paths import get_global_paths
 
 
 def assign_tracks_to_profiles(video_path: Path, pose_path: Path, logger) -> list[dict[str, str]]:
-    try:
-        import cv2  # noqa: F401
-    except Exception as exc:
+    if importlib.util.find_spec("cv2") is None:
         raise KnownError(
             "E_CV2_IMPORT",
             "OpenCV import failed.",
             "Engine bundle may be missing OpenCV DLLs. Use the Release zip; do not run from source.",
-        ) from exc
+        )
+
+    importlib.import_module("cv2")
 
     if not pose_path.exists():
         raise KnownError("E_POSE_MISSING", "pose.json missing.", "Run pose extraction before profile assignment.")
 
     pose_data = json.loads(pose_path.read_text())
-    tracks = pose_data.get("tracks", [])
+    tracks = _group_tracks(pose_data.get("frames", []))
 
     global_paths = get_global_paths()
     profiles_path = global_paths.profiles_pool_path
@@ -60,6 +62,17 @@ def assign_tracks_to_profiles(video_path: Path, pose_path: Path, logger) -> list
     cap.release()
     _save_pool(profiles_path, pool)
     return assignments
+
+
+def _group_tracks(frames: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    track_map: dict[str, list[dict[str, Any]]] = {}
+    for frame in frames:
+        for track in frame.get("tracks", []):
+            track_id = track.get("track_id")
+            if track_id is None:
+                continue
+            track_map.setdefault(str(track_id), []).append(track)
+    return [{"track_id": track_id, "frames": track_frames} for track_id, track_frames in track_map.items()]
 
 
 def _compute_signature(cap, frames: list[dict[str, Any]], width: int, height: int) -> list[float] | None:

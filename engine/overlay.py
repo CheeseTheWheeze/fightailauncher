@@ -1,3 +1,5 @@
+import importlib
+import importlib.util
 import json
 from pathlib import Path
 
@@ -8,29 +10,29 @@ def render_overlay(video_path: Path, outputs_dir: Path, logger) -> dict:
     overlay_path = outputs_dir / "overlay.mp4"
     pose_path = outputs_dir / "pose.json"
 
-    try:
-        import cv2
-    except Exception as exc:
+    if importlib.util.find_spec("cv2") is None:
         raise KnownError(
             "E_CV2_IMPORT",
             "OpenCV import failed.",
             "Engine bundle may be missing OpenCV DLLs. Use the Release zip; do not run from source.",
-        ) from exc
-    try:
-        import mediapipe as mp
-        from mediapipe.framework.formats import landmark_pb2
-    except Exception as exc:
+        )
+    if importlib.util.find_spec("mediapipe") is None:
         raise KnownError(
             "E_MEDIAPIPE_MISSING",
             "MediaPipe is required for overlay rendering.",
             "This release is missing mediapipe in engine.exe; rebuild release.",
-        ) from exc
+        )
+
+    cv2 = importlib.import_module("cv2")
+    mp = importlib.import_module("mediapipe")
+    landmark_pb2 = importlib.import_module("mediapipe.framework.formats.landmark_pb2")
 
     if not pose_path.exists():
         raise KnownError("E_POSE_MISSING", "pose.json missing.", "Run pose extraction before overlay rendering.")
 
     pose_data = json.loads(pose_path.read_text())
     frames = pose_data.get("frames", [])
+    primary_track_ids = pose_data.get("primary_track_ids", [])
 
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
@@ -46,62 +48,53 @@ def render_overlay(video_path: Path, outputs_dir: Path, logger) -> dict:
         cap.release()
         raise KnownError("E_OVERLAY_WRITE", "Failed to open overlay writer.", "Check codec availability.")
 
-    frame_map: dict[int, list[dict]] = {}
+    frame_map: dict[int, dict] = {}
     for frame in frames:
         frame_index = frame.get("frame_index")
         if frame_index is None:
             continue
-        frame_map.setdefault(frame_index, []).append(frame)
+        frame_map[frame_index] = frame
 
     mp_pose = mp.solutions.pose
     drawing_utils = mp.solutions.drawing_utils
-    drawing_styles = mp.solutions.drawing_styles
     name_to_index = {landmark.name: landmark.value for landmark in mp_pose.PoseLandmark}
 
     frame_index = 0
-    predicted_drawn = False
+    track_colors = _build_track_colors(primary_track_ids)
     while True:
         success, frame = cap.read()
         if not success:
             break
 
-        for track_frame in frame_map.get(frame_index, []):
-            landmarks = track_frame.get("landmarks", [])
-            if not landmarks:
-                continue
-            is_predicted = bool(track_frame.get("is_predicted"))
-            landmark_list = _build_landmark_list(landmarks, name_to_index, landmark_pb2)
-            if is_predicted:
-                predicted_drawn = True
-                drawing_utils.draw_landmarks(
-                    frame,
-                    landmark_list,
-                    mp_pose.POSE_CONNECTIONS,
-                    drawing_utils.DrawingSpec(color=(0, 255, 255), thickness=1, circle_radius=1),
-                    drawing_utils.DrawingSpec(color=(0, 200, 200), thickness=1, circle_radius=1),
-                )
-            else:
-                drawing_utils.draw_landmarks(
-                    frame,
-                    landmark_list,
-                    mp_pose.POSE_CONNECTIONS,
-                    drawing_styles.get_default_pose_landmarks_style(),
-                )
-
-        if predicted_drawn:
-            cv2.putText(
-                frame,
-                "PRED",
-                (10, 30),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                1.0,
-                (0, 255, 255),
-                2,
-                cv2.LINE_AA,
-            )
+        frame_data = frame_map.get(frame_index)
+        if frame_data:
+            for track_frame in frame_data.get("tracks", []):
+                landmarks = track_frame.get("landmarks", [])
+                if not landmarks:
+                    continue
+                track_id = track_frame.get("track_id")
+                is_predicted = bool(track_frame.get("is_predicted"))
+                color = track_colors.get(track_id, (255, 255, 255))
+                landmark_list = _build_landmark_list(landmarks, name_to_index, landmark_pb2)
+                if is_predicted:
+                    drawing_utils.draw_landmarks(
+                        frame,
+                        landmark_list,
+                        mp_pose.POSE_CONNECTIONS,
+                        drawing_utils.DrawingSpec(color=color, thickness=1, circle_radius=1),
+                        drawing_utils.DrawingSpec(color=color, thickness=1, circle_radius=1),
+                    )
+                    _draw_pred_label(frame, track_frame.get("bbox"), color)
+                else:
+                    drawing_utils.draw_landmarks(
+                        frame,
+                        landmark_list,
+                        mp_pose.POSE_CONNECTIONS,
+                        drawing_utils.DrawingSpec(color=color, thickness=2, circle_radius=2),
+                        drawing_utils.DrawingSpec(color=color, thickness=2, circle_radius=2),
+                    )
         writer.write(frame)
         frame_index += 1
-        predicted_drawn = False
 
     cap.release()
     writer.release()
@@ -140,3 +133,32 @@ def _build_landmark_list(landmarks: list[dict], name_to_index: dict[str, int], l
         for lm in ordered
     ]
     return landmark_pb2.NormalizedLandmarkList(landmark=filled)
+
+
+def _build_track_colors(primary_track_ids: list[int]) -> dict[int, tuple[int, int, int]]:
+    palette = [
+        (0, 200, 255),  # Track A (orange-ish)
+        (0, 255, 100),  # Track B (green)
+    ]
+    return {track_id: palette[idx % len(palette)] for idx, track_id in enumerate(primary_track_ids)}
+
+
+def _draw_pred_label(frame, bbox: dict | None, color: tuple[int, int, int]) -> None:
+    import cv2
+
+    if bbox:
+        x = int(bbox.get("x_min", 0.0) * frame.shape[1])
+        y = int(bbox.get("y_min", 0.0) * frame.shape[0])
+        pos = (max(x, 0), max(y - 10, 10))
+    else:
+        pos = (10, 30)
+    cv2.putText(
+        frame,
+        "PRED",
+        pos,
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.5,
+        color,
+        1,
+        cv2.LINE_AA,
+    )

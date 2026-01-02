@@ -38,7 +38,7 @@ public static class AppInstaller
             if (!File.Exists(targetExe))
             {
                 var message = $"Target executable not found at {targetExe}";
-                DesktopLogger.Log(message);
+                Logger.Log(message);
                 return new InstallResult(true, false, message);
             }
 
@@ -53,13 +53,13 @@ public static class AppInstaller
                 if (process == null)
                 {
                     var message = "Process.Start returned null during relaunch.";
-                    DesktopLogger.Log(message);
+                    Logger.Log(message);
                     return new InstallResult(true, false, message);
                 }
             }
             catch (Exception ex)
             {
-                DesktopLogger.Log($"Failed to relaunch: {ex}");
+                Logger.Log($"Failed to relaunch: {ex}");
                 return new InstallResult(true, false, ex.Message);
             }
 
@@ -67,7 +67,7 @@ public static class AppInstaller
         }
         catch (Exception ex)
         {
-            DesktopLogger.Log($"EnsureInstalled failed: {ex}");
+            Logger.Log($"EnsureInstalled failed: {ex}");
             return new InstallResult(true, false, ex.Message);
         }
     }
@@ -82,7 +82,7 @@ public static class AppInstaller
             }
             catch
             {
-                DesktopLogger.Log($"Failed to delete existing junction at {junctionPath}.");
+                Logger.Log($"Failed to delete existing junction at {junctionPath}.");
             }
         }
 
@@ -97,7 +97,7 @@ public static class AppInstaller
         if (process == null)
         {
             var message = "Failed to start mklink process.";
-            DesktopLogger.Log(message);
+            Logger.Log(message);
             return new JunctionResult(false, message);
         }
 
@@ -105,7 +105,7 @@ public static class AppInstaller
         if (process.ExitCode != 0)
         {
             var message = $"mklink exited with code {process.ExitCode}.";
-            DesktopLogger.Log(message);
+            Logger.Log(message);
             return new JunctionResult(false, message);
         }
 

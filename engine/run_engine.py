@@ -4,12 +4,22 @@ import logging
 import shutil
 import sys
 import time
+import traceback
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from engine.errors import KnownError  # noqa: E402
+from engine.overlay import render_overlay  # noqa: E402
+from engine.pose import extract_pose  # noqa: E402
+from engine.result_contract import (  # noqa: E402
+    ResultStatus,
+    safe_write_json,
+    write_result_error,
+    write_result_ok,
+)
 from shared.storage_paths import (  # noqa: E402
     ensure_clip_dirs,
     ensure_global_dirs,
@@ -17,19 +27,8 @@ from shared.storage_paths import (  # noqa: E402
     get_global_paths,
 )
 
-from engine.pose import extract_pose  # noqa: E402
-from engine.overlay import render_overlay  # noqa: E402
 
-
-class EngineError(Exception):
-    def __init__(self, message, hints=None, exit_code=2):
-        super().__init__(message)
-        self.message = message
-        self.hints = hints or []
-        self.exit_code = exit_code
-
-
-def setup_logging(global_log: Path, clip_log: Path):
+def setup_logging(engine_log: Path) -> logging.Logger:
     logger = logging.getLogger("engine")
     logger.setLevel(logging.INFO)
     logger.handlers.clear()
@@ -39,35 +38,28 @@ def setup_logging(global_log: Path, clip_log: Path):
     stream_handler = logging.StreamHandler(sys.stdout)
     stream_handler.setFormatter(formatter)
 
-    global_handler = logging.FileHandler(global_log)
-    global_handler.setFormatter(formatter)
-
-    clip_handler = logging.FileHandler(clip_log)
-    clip_handler.setFormatter(formatter)
+    file_handler = logging.FileHandler(engine_log)
+    file_handler.setFormatter(formatter)
 
     logger.addHandler(stream_handler)
-    logger.addHandler(global_handler)
-    logger.addHandler(clip_handler)
+    logger.addHandler(file_handler)
     return logger
 
 
-def write_error(outputs_dir: Path, message: str, exc: Exception, hints=None):
-    error_path = outputs_dir / "error.json"
-    error_payload = {
-        "message": message,
-        "exception": repr(exc),
-        "stack": getattr(exc, "__traceback__", None) and "see logs",
-        "hints": hints or [],
-    }
-    error_path.write_text(json.dumps(error_payload, indent=2))
+def read_version() -> str:
+    version_path = REPO_ROOT / "shared" / "version.json"
+    if version_path.exists():
+        try:
+            payload = json.loads(version_path.read_text())
+            return payload.get("version", "unknown")
+        except Exception:
+            return "unknown"
+    return "unknown"
 
 
-def analyze(args: argparse.Namespace) -> int:
-    started = time.time()
+def resolve_outputs_logs(args: argparse.Namespace):
     clip_paths = get_clip_paths(args.athlete, args.clip)
-    global_paths = get_global_paths()
     ensure_clip_dirs(clip_paths)
-    ensure_global_dirs(global_paths)
 
     outputs_dir = Path(args.outdir) if args.outdir else clip_paths.outputs_dir
     outputs_dir.mkdir(parents=True, exist_ok=True)
@@ -77,46 +69,123 @@ def analyze(args: argparse.Namespace) -> int:
         logs_dir = Path(args.outdir).parent / "logs"
     logs_dir.mkdir(parents=True, exist_ok=True)
 
-    logger = setup_logging(
-        global_paths.logs_dir / "engine.log",
-        logs_dir / "engine.log",
-    )
+    return clip_paths, outputs_dir, logs_dir
 
-    logger.info("Starting analysis for athlete=%s clip=%s", args.athlete, args.clip)
+
+def analyze(args: argparse.Namespace) -> int:
+    started = time.time()
+    clip_paths, outputs_dir, logs_dir = resolve_outputs_logs(args)
+    global_paths = get_global_paths()
+    ensure_global_dirs(global_paths)
+
+    engine_log = logs_dir / "engine.log"
+    engine_log.touch(exist_ok=True)
+    logger = setup_logging(engine_log)
 
     video_path = Path(args.video)
-    if not video_path.exists():
-        raise EngineError("Video file does not exist.", [str(video_path)])
-
-    input_copy = clip_paths.input_dir / video_path.name
-    if input_copy.resolve() != video_path.resolve():
-        shutil.copyfile(video_path, input_copy)
-
-    pose_result = extract_pose(video_path, outputs_dir, logger)
-    overlay_result = render_overlay(video_path, outputs_dir, logger)
-
     result = {
-        "status": "ok",
-        "athlete_id": args.athlete,
-        "clip_id": args.clip,
-        "video": str(video_path),
+        "status": ResultStatus.ERROR,
+        "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "version": read_version(),
+        "inputs": {
+            "video": str(video_path),
+            "athlete_id": args.athlete,
+            "clip_id": args.clip,
+        },
         "outputs": {
-            "pose": pose_result["pose_path"],
-            "overlay": overlay_result["overlay_path"],
+            "overlay_mp4": "overlay.mp4",
+            "pose_json": "pose.json",
+            "result_json": "result.json",
+            "error_json": "error.json",
+            "outputs_dir": str(outputs_dir),
         },
-        "timings_ms": {
-            "total": int((time.time() - started) * 1000),
-            "pose": pose_result["pose_duration_ms"],
+        "logs": {
+            "engine_log": "engine.log",
+            "logs_dir": str(logs_dir),
         },
-        "details": {
-            "pose_status": pose_result["pose_status"],
-            "overlay_status": overlay_result["overlay_status"],
-        },
+        "warnings": [],
     }
 
-    (outputs_dir / "result.json").write_text(json.dumps(result, indent=2))
-    logger.info("Analysis completed successfully.")
-    return 0
+    exit_code = 3
+    try:
+        logger.info("Starting analysis for athlete=%s clip=%s", args.athlete, args.clip)
+
+        if not video_path.exists():
+            raise KnownError(
+                "E_VIDEO_MISSING",
+                "Video file does not exist.",
+                f"Check the path: {video_path}",
+            )
+
+        if not video_path.is_file():
+            raise KnownError(
+                "E_VIDEO_INVALID",
+                "Video path is not a file.",
+                f"Check the path: {video_path}",
+            )
+
+        input_copy = clip_paths.input_dir / video_path.name
+        if input_copy.resolve() != video_path.resolve():
+            shutil.copyfile(video_path, input_copy)
+
+        pose_result = extract_pose(video_path, outputs_dir, logger)
+        overlay_result = render_overlay(video_path, outputs_dir, logger)
+
+        result["outputs"]["pose_json"] = _relative_to(outputs_dir, pose_result["pose_path"])
+        result["outputs"]["overlay_mp4"] = _relative_to(outputs_dir, overlay_result["overlay_path"])
+        result["timings_ms"] = {
+            "total": int((time.time() - started) * 1000),
+            "pose": pose_result["pose_duration_ms"],
+        }
+        result["details"] = {
+            "pose_status": pose_result["pose_status"],
+            "overlay_status": overlay_result["overlay_status"],
+        }
+
+        write_result_ok(result)
+        exit_code = 0
+        logger.info("Analysis completed successfully.")
+    except KnownError as exc:
+        write_result_error(result, exc.code, exc.message, exc.hint)
+        exit_code = 2
+        logger.error("Handled error: %s (%s)", exc.message, exc.code)
+    except Exception as exc:
+        stack = traceback.format_exc()
+        write_result_error(
+            result,
+            "E_UNEXPECTED",
+            "Unexpected engine crash.",
+            "Check engine.log for details.",
+        )
+        result["error"]["details"] = {
+            "exception": f"{type(exc).__name__}: {exc}",
+            "stack": stack,
+        }
+        exit_code = 3
+        logger.exception("Unexpected error")
+    finally:
+        result["finished_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        result["duration_ms"] = int((time.time() - started) * 1000)
+        safe_write_json(outputs_dir / "result.json", result)
+        if result.get("status") == ResultStatus.ERROR:
+            safe_write_json(outputs_dir / "error.json", result.get("error", {}))
+        _flush_logger(logger)
+
+    return exit_code
+
+
+def _relative_to(outputs_dir: Path, path_value: str) -> str:
+    try:
+        return str(Path(path_value).resolve().relative_to(outputs_dir.resolve()))
+    except Exception:
+        return str(path_value)
+
+
+def _flush_logger(logger: logging.Logger) -> None:
+    for handler in list(logger.handlers):
+        handler.flush()
+        handler.close()
+        logger.removeHandler(handler)
 
 
 def main() -> int:
@@ -132,46 +201,9 @@ def main() -> int:
 
     args = parser.parse_args()
 
-    try:
-        if args.command == "analyze":
-            return analyze(args)
-        raise EngineError("Unknown command.")
-    except EngineError as exc:
-        clip_paths = get_clip_paths(args.athlete, args.clip)
-        ensure_clip_dirs(clip_paths)
-        outputs_dir = Path(args.outdir) if args.outdir else clip_paths.outputs_dir
-        outputs_dir.mkdir(parents=True, exist_ok=True)
-        global_paths = get_global_paths()
-        ensure_global_dirs(global_paths)
-        logs_dir = clip_paths.logs_dir
-        if args.outdir:
-            logs_dir = Path(args.outdir).parent / "logs"
-        logs_dir.mkdir(parents=True, exist_ok=True)
-        logger = setup_logging(
-            global_paths.logs_dir / "engine.log",
-            logs_dir / "engine.log",
-        )
-        logger.error("Handled error: %s", exc.message)
-        write_error(outputs_dir, exc.message, exc, exc.hints)
-        return exc.exit_code
-    except Exception as exc:  # unexpected
-        clip_paths = get_clip_paths(args.athlete, args.clip)
-        ensure_clip_dirs(clip_paths)
-        outputs_dir = Path(args.outdir) if args.outdir else clip_paths.outputs_dir
-        outputs_dir.mkdir(parents=True, exist_ok=True)
-        global_paths = get_global_paths()
-        ensure_global_dirs(global_paths)
-        logs_dir = clip_paths.logs_dir
-        if args.outdir:
-            logs_dir = Path(args.outdir).parent / "logs"
-        logs_dir.mkdir(parents=True, exist_ok=True)
-        logger = setup_logging(
-            global_paths.logs_dir / "engine.log",
-            logs_dir / "engine.log",
-        )
-        logger.exception("Unexpected error")
-        write_error(outputs_dir, "Unexpected error", exc, ["Check engine.log"])
-        return 3
+    if args.command == "analyze":
+        return analyze(args)
+    raise SystemExit("Unknown command.")
 
 
 if __name__ == "__main__":

@@ -25,3 +25,9 @@ Track recurring failures and mitigations to avoid regressions.
 - **Root cause:** MediaPipe was not bundled into the engine build and overlay generation reused the input frames.
 - **Fix:** Bundle MediaPipe, implement MediaPipe pose extraction, and draw skeleton landmarks/bones in overlay output.
 - **Prevention:** Smoke test asserts pose landmarks are present and overlay_status is ok.
+
+## 2025-02-24
+- **Symptom:** Only one skeleton, limb confusion between two athletes, skeleton disappears when far away.
+- **Root cause:** Single-person pose + no per-person tracking; wide shots reduce detection.
+- **Fix:** Multi-pose landmarker + per-person tracking IDs + size gating + crop-and-rescale for small subjects.
+- **Prevention:** Metrics per track; require two primary tracks when two large subjects present.

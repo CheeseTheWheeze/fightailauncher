@@ -2,11 +2,15 @@ name: windows-build
 
 on:
   push:
+    branches:
+      - main
   pull_request:
 
 jobs:
   build:
     runs-on: windows-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -20,24 +24,57 @@ jobs:
         with:
           dotnet-version: "8.0.x"
 
-      - name: Smoke test
-        run: python scripts/smoke_test.py
+      - name: Install engine dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r engine/requirements.txt
+          pip install pyinstaller
+
+      - name: Build engine
+        run: pyinstaller engine/pyinstaller.spec
 
       - name: Build desktop
-        run: dotnet build apps/desktop/FightingOverlay.Desktop.csproj -c Release
+        run: dotnet publish apps/desktop/FightingOverlay.Desktop.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
+
+      - name: Smoke test engine
+        run: powershell -File scripts/smoke_test.ps1 -EnginePath dist/engine/engine.exe
+
+      - name: Compute version
+        id: version
+        run: |
+          $short = git rev-parse --short HEAD
+          $date = Get-Date -Format "yyyyMMdd"
+          $version = "v$($date)-$short"
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
       - name: Package artifact
         run: |
           $dist = Join-Path $env:GITHUB_WORKSPACE "dist"
-          $app = Join-Path $dist "FightingOverlay"
+          $app = Join-Path $dist "FightAILauncher"
+          $version = "${{ steps.version.outputs.version }}"
+          $publishDir = Join-Path $env:GITHUB_WORKSPACE "apps/desktop/bin/Release/net8.0-windows/win-x64/publish"
           New-Item -ItemType Directory -Force -Path $app | Out-Null
-          Copy-Item -Recurse -Force (Join-Path $env:GITHUB_WORKSPACE "apps/desktop/bin/Release/net8.0-windows/") $app
-          Copy-Item -Recurse -Force (Join-Path $env:GITHUB_WORKSPACE "engine") (Join-Path $app "engine")
-          Copy-Item -Recurse -Force (Join-Path $env:GITHUB_WORKSPACE "shared") (Join-Path $app "shared")
-          Compress-Archive -Path $app -DestinationPath (Join-Path $dist "FightingOverlay.zip")
+          Copy-Item -Recurse -Force (Join-Path $publishDir "*") $app
+          $engineTarget = Join-Path $app "engine"
+          New-Item -ItemType Directory -Force -Path $engineTarget | Out-Null
+          Copy-Item -Recurse -Force (Join-Path $env:GITHUB_WORKSPACE "dist/engine/*") $engineTarget
+          $sharedDir = Join-Path $app "shared"
+          New-Item -ItemType Directory -Force -Path $sharedDir | Out-Null
+          @{ version = $version } | ConvertTo-Json | Set-Content (Join-Path $sharedDir "version.json")
+          "Download and run FightAILauncher.exe. Data lives under %LOCALAPPDATA%\FightingOverlay\data." | Set-Content (Join-Path $app "README.txt")
+          Compress-Archive -Path $app\* -DestinationPath (Join-Path $dist "FightAILauncher-Windows.zip")
 
-      - name: Upload artifact
+      - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: FightingOverlay
-          path: dist/FightingOverlay.zip
+          name: FightAILauncher-Windows
+          path: dist/FightAILauncher-Windows.zip
+
+      - name: Publish GitHub Release
+        if: github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.version }}
+          name: ${{ steps.version.outputs.version }}
+          make_latest: true
+          files: dist/FightAILauncher-Windows.zip

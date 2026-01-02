@@ -72,9 +72,14 @@ def analyze(args: argparse.Namespace) -> int:
     outputs_dir = Path(args.outdir) if args.outdir else clip_paths.outputs_dir
     outputs_dir.mkdir(parents=True, exist_ok=True)
 
+    logs_dir = clip_paths.logs_dir
+    if args.outdir:
+        logs_dir = Path(args.outdir).parent / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+
     logger = setup_logging(
         global_paths.logs_dir / "engine.log",
-        clip_paths.logs_dir / "engine.log",
+        logs_dir / "engine.log",
     )
 
     logger.info("Starting analysis for athlete=%s clip=%s", args.athlete, args.clip)
@@ -91,7 +96,7 @@ def analyze(args: argparse.Namespace) -> int:
     overlay_result = render_overlay(video_path, outputs_dir, logger)
 
     result = {
-        "status": "success",
+        "status": "ok",
         "athlete_id": args.athlete,
         "clip_id": args.clip,
         "video": str(video_path),
@@ -138,9 +143,13 @@ def main() -> int:
         outputs_dir.mkdir(parents=True, exist_ok=True)
         global_paths = get_global_paths()
         ensure_global_dirs(global_paths)
+        logs_dir = clip_paths.logs_dir
+        if args.outdir:
+            logs_dir = Path(args.outdir).parent / "logs"
+        logs_dir.mkdir(parents=True, exist_ok=True)
         logger = setup_logging(
             global_paths.logs_dir / "engine.log",
-            clip_paths.logs_dir / "engine.log",
+            logs_dir / "engine.log",
         )
         logger.error("Handled error: %s", exc.message)
         write_error(outputs_dir, exc.message, exc, exc.hints)
@@ -152,9 +161,13 @@ def main() -> int:
         outputs_dir.mkdir(parents=True, exist_ok=True)
         global_paths = get_global_paths()
         ensure_global_dirs(global_paths)
+        logs_dir = clip_paths.logs_dir
+        if args.outdir:
+            logs_dir = Path(args.outdir).parent / "logs"
+        logs_dir.mkdir(parents=True, exist_ok=True)
         logger = setup_logging(
             global_paths.logs_dir / "engine.log",
-            clip_paths.logs_dir / "engine.log",
+            logs_dir / "engine.log",
         )
         logger.exception("Unexpected error")
         write_error(outputs_dir, "Unexpected error", exc, ["Check engine.log"])

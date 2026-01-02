@@ -5,11 +5,12 @@
     <UseWPF>true</UseWPF>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>FightAILauncher</AssemblyName>
   </PropertyGroup>
 
   <ItemGroup>
     <Content Include="..\..\shared\version.json">
-      <Link>version.json</Link>
+      <Link>shared\version.json</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
   </ItemGroup>

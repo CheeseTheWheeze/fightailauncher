@@ -13,6 +13,7 @@ public partial class MainWindow : Window
     private readonly string _desktopLogPath;
     private string? _lastOutputDir;
     private string? _lastLogsDir;
+    private readonly UpdateService _updateService = new();
 
     public MainWindow()
     {
@@ -51,18 +52,7 @@ public partial class MainWindow : Window
     {
         try
         {
-            var versionPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "version.json");
-            if (!File.Exists(versionPath))
-            {
-                return;
-            }
-
-            using var stream = File.OpenRead(versionPath);
-            var doc = JsonDocument.Parse(stream);
-            if (doc.RootElement.TryGetProperty("version", out var version))
-            {
-                VersionText.Text = $"Version {version.GetString()}";
-            }
+            VersionText.Text = $"Version {VersionInfo.ReadVersion()}";
         }
         catch (Exception ex)
         {
@@ -140,8 +130,8 @@ public partial class MainWindow : Window
 
         var startInfo = new ProcessStartInfo
         {
-            FileName = engineInfo.FileName,
-            Arguments = engineInfo.IsPython ? $"\"{engineInfo.EnginePath}\" {args}" : args.ToString(),
+            FileName = engineInfo.EnginePath,
+            Arguments = args.ToString(),
             WorkingDirectory = AppDomain.CurrentDomain.BaseDirectory,
             UseShellExecute = false,
             RedirectStandardOutput = true,
@@ -177,7 +167,7 @@ public partial class MainWindow : Window
         {
             var json = File.ReadAllText(resultPath);
             var result = JsonSerializer.Deserialize<ResultRecord>(json);
-            if (result != null && result.outputs?.overlay != null)
+            if (result != null && result.outputs?.overlay != null && result.status == "ok")
             {
                 LoadOverlay(result.outputs.overlay);
             }
@@ -185,6 +175,37 @@ public partial class MainWindow : Window
         else
         {
             AppendLog("result.json not found.");
+        }
+    }
+
+    private async void OnUpdate(object sender, RoutedEventArgs e)
+    {
+        UpdateButton.IsEnabled = false;
+        try
+        {
+            AppendLog("Checking for updates...");
+            var update = await _updateService.CheckForUpdateAsync();
+            if (update == null)
+            {
+                AppendLog("No update available.");
+                MessageBox.Show("You're already on the latest version.");
+                return;
+            }
+
+            AppendLog($"Downloading update {update.Version}...");
+            var scriptPath = await _updateService.DownloadAndStageAsync(update);
+            AppendLog("Update staged. Restarting to apply update...");
+            _updateService.ApplyUpdateAndRestart(scriptPath);
+            Application.Current.Shutdown();
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"Update failed: {ex.Message}");
+            MessageBox.Show($"Update failed: {ex.Message}");
+        }
+        finally
+        {
+            UpdateButton.IsEnabled = true;
         }
     }
 
@@ -247,27 +268,18 @@ public static class EngineLocator
         var envPath = Environment.GetEnvironmentVariable("FIGHTING_OVERLAY_ENGINE_PATH");
         if (!string.IsNullOrWhiteSpace(envPath) && File.Exists(envPath))
         {
-            return new EngineInfo(envPath, Path.GetExtension(envPath).Equals(".py", StringComparison.OrdinalIgnoreCase));
+            return new EngineInfo(envPath);
         }
 
         var baseDir = AppDomain.CurrentDomain.BaseDirectory;
-        var exePath = Path.Combine(baseDir, "engine.exe");
+        var exePath = Path.Combine(baseDir, "engine", "engine.exe");
         if (File.Exists(exePath))
         {
-            return new EngineInfo(exePath, false);
-        }
-
-        var pyPath = Path.Combine(baseDir, "engine", "run_engine.py");
-        if (File.Exists(pyPath))
-        {
-            return new EngineInfo(pyPath, true);
+            return new EngineInfo(exePath);
         }
 
         return null;
     }
 }
 
-public record EngineInfo(string EnginePath, bool IsPython)
-{
-    public string FileName => IsPython ? "python" : EnginePath;
-}
+public record EngineInfo(string EnginePath);

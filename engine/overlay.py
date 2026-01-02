@@ -1,11 +1,28 @@
 import shutil
 import subprocess
+import sys
 from pathlib import Path
+
+from imageio_ffmpeg import get_ffmpeg_exe
+
+
+def resolve_ffmpeg_path(logger) -> str | None:
+    try:
+        return get_ffmpeg_exe()
+    except Exception as exc:
+        logger.warning("Bundled FFmpeg not available: %s", exc)
+
+    base_dir = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
+    candidate = base_dir / "ffmpeg.exe"
+    if candidate.exists():
+        return str(candidate)
+    return None
 
 
 def render_overlay(video_path: Path, outputs_dir: Path, logger) -> dict:
     overlay_path = outputs_dir / "overlay.mp4"
-    ffmpeg_path = shutil.which("ffmpeg")
+    ffmpeg_path = resolve_ffmpeg_path(logger)
+
     if ffmpeg_path:
         logger.info("FFmpeg detected; copying video with metadata.")
         result = subprocess.run(

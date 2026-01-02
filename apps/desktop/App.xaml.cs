@@ -20,13 +20,13 @@ public partial class App : Application
 
             if (!string.IsNullOrWhiteSpace(result.ErrorMessage))
             {
-                DesktopLogger.Log($"Startup install/relaunch failed: {result.ErrorMessage}");
+                Logger.Log($"Startup install/relaunch failed: {result.ErrorMessage}");
                 ShowStartupError($"Install/relaunch failed: {result.ErrorMessage}");
             }
         }
         catch (Exception ex)
         {
-            DesktopLogger.Log($"Startup failed: {ex}");
+            Logger.Log($"Startup failed: {ex}");
             ShowStartupError($"Startup failed: {ex.Message}");
         }
 
@@ -43,7 +43,7 @@ public partial class App : Application
             MessageBoxImage.Warning);
         if (result == MessageBoxResult.Yes)
         {
-            DesktopLogger.OpenLogsFolder();
+            Logger.OpenLogsFolder();
         }
     }
 }

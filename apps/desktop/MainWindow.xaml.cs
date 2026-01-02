@@ -2,7 +2,6 @@ using Microsoft.Win32;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
-using System.Text;
 using System.Text.Json;
 using System.Windows;
 
@@ -12,6 +11,7 @@ public partial class MainWindow : Window
 {
     private string? _lastOutputDir;
     private string? _lastLogsDir;
+    private string? _lastEngineVersion;
     private readonly UpdateService _updateService = new();
 
     public MainWindow()
@@ -73,6 +73,9 @@ public partial class MainWindow : Window
         BaseDirText.Text = $"Running from: {AppDomain.CurrentDomain.BaseDirectory}";
         InstalledDirText.Text = $"Installed current dir: {AppPaths.CurrentDir()}";
         LatestVersionText.Text = $"Latest pointer: {ReadLatestVersion()}";
+        EnginePathText.Text = $"Engine path attempted: {EngineLocator.GetAttemptedEnginePath()}";
+        OutputDirText.Text = "Output folder: (none yet)";
+        EngineVersionText.Text = "Engine version: unknown";
     }
 
     private static string ReadLatestVersion()
@@ -124,12 +127,11 @@ public partial class MainWindow : Window
     private async void OnAnalyze(object sender, RoutedEventArgs e)
     {
         var videoPath = VideoPathTextBox.Text.Trim();
-        if (string.IsNullOrWhiteSpace(videoPath) || !File.Exists(videoPath))
+        if (string.IsNullOrWhiteSpace(videoPath))
         {
-            MessageBox.Show("Please select a valid video file.");
+            MessageBox.Show("Please select a video file.");
             return;
         }
-
         if (ProfileComboBox.SelectedItem is not ProfileItem profile)
         {
             MessageBox.Show("Please select an athlete profile.");
@@ -144,70 +146,50 @@ public partial class MainWindow : Window
 
         _lastOutputDir = clipPaths.OutputsDir;
         _lastLogsDir = clipPaths.LogsDir;
+        OpenOutputButton.IsEnabled = false;
+        OutputDirText.Text = $"Output folder: {clipPaths.OutputsDir}";
         AppendLog($"Starting analysis for {profile.Name} (clip {clipId})");
 
         var engineInfo = EngineLocator.ResolveEngine();
         if (engineInfo == null)
         {
-            DesktopLogger.Log("Engine not found. Set FIGHTING_OVERLAY_ENGINE_PATH or install engine.");
+            Logger.Log("Engine not found. Set FIGHTING_OVERLAY_ENGINE_PATH or install engine.");
             ShowEngineMissingDialog();
             return;
         }
-
-        var args = new StringBuilder();
-        args.Append("analyze ");
-        args.Append($"--video \"{videoPath}\" ");
-        args.Append($"--athlete {profile.Id} ");
-        args.Append($"--clip {clipId} ");
-        args.Append($"--outdir \"{clipPaths.OutputsDir}\"");
-
-        var startInfo = new ProcessStartInfo
+        EnginePathText.Text = $"Engine path attempted: {engineInfo.EnginePath}";
+        var runner = new EngineRunner(engineInfo);
+        EngineRunResult result;
+        try
         {
-            FileName = engineInfo.EnginePath,
-            Arguments = args.ToString(),
-            WorkingDirectory = AppDomain.CurrentDomain.BaseDirectory,
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            CreateNoWindow = true
-        };
-
-        using var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
-        process.OutputDataReceived += (_, eventArgs) =>
+            result = await runner.RunAnalyzeAsync(videoPath, profile.Id, clipId, AppendLog);
+        }
+        catch (Exception ex)
         {
-            if (eventArgs.Data != null)
+            Logger.Log($"Analyze failed: {ex}");
+            MessageBox.Show($"Analyze failed: {ex.Message}");
+            return;
+        }
+
+        _lastEngineVersion = result.Version ?? "unknown";
+        EngineVersionText.Text = $"Engine version: {_lastEngineVersion}";
+
+        if (result.Status == "ok")
+        {
+            OpenOutputButton.IsEnabled = true;
+            var overlayPath = result.ResolveOverlayPath(clipPaths.OutputsDir);
+            if (!string.IsNullOrWhiteSpace(overlayPath))
             {
-                AppendLog(eventArgs.Data);
+                LoadOverlay(overlayPath);
             }
-        };
-        process.ErrorDataReceived += (_, eventArgs) =>
-        {
-            if (eventArgs.Data != null)
+            else
             {
-                AppendLog($"ERR: {eventArgs.Data}");
-            }
-        };
-
-        process.Start();
-        process.BeginOutputReadLine();
-        process.BeginErrorReadLine();
-
-        await process.WaitForExitAsync();
-        AppendLog($"Engine exited with code {process.ExitCode}");
-
-        var resultPath = Path.Combine(clipPaths.OutputsDir, "result.json");
-        if (File.Exists(resultPath))
-        {
-            var json = File.ReadAllText(resultPath);
-            var result = JsonSerializer.Deserialize<ResultRecord>(json);
-            if (result != null && result.outputs?.overlay != null && result.status == "ok")
-            {
-                LoadOverlay(result.outputs.overlay);
+                AppendLog("Overlay path missing in result.json.");
             }
         }
         else
         {
-            AppendLog("result.json not found.");
+            ShowEngineError(result, clipPaths.OutputsDir, clipPaths.LogsDir);
         }
     }
 
@@ -268,7 +250,7 @@ public partial class MainWindow : Window
 
     private void OnOpenLogs(object sender, RoutedEventArgs e)
     {
-        var logsDir = _lastLogsDir ?? DesktopLogger.LogDirectory;
+        var logsDir = _lastLogsDir ?? Logger.LogDirectory;
         Process.Start(new ProcessStartInfo("explorer.exe", logsDir) { UseShellExecute = true });
     }
 
@@ -279,7 +261,7 @@ public partial class MainWindow : Window
             LogTextBox.AppendText(message + Environment.NewLine);
             LogTextBox.ScrollToEnd();
         });
-        DesktopLogger.Log(message);
+        Logger.Log(message);
     }
 
     private void ShowEngineMissingDialog()
@@ -292,11 +274,46 @@ public partial class MainWindow : Window
 
         if (result == MessageBoxResult.Yes)
         {
-            DesktopLogger.OpenLogsFolder();
+            Logger.OpenLogsFolder();
         }
         else if (result == MessageBoxResult.No)
         {
             Process.Start(new ProcessStartInfo("explorer.exe", AppDomain.CurrentDomain.BaseDirectory) { UseShellExecute = true });
+        }
+    }
+
+    private void ShowEngineError(EngineRunResult result, string outputDir, string logsDir)
+    {
+        var errorMessage = result.Error?.Message ?? "Engine failed with an unknown error.";
+        var hint = result.Error?.Hint;
+        var code = result.Error?.Code;
+        var message = $"{errorMessage}";
+
+        if (!string.IsNullOrWhiteSpace(code))
+        {
+            message += $"\n\nError code: {code}";
+        }
+
+        if (!string.IsNullOrWhiteSpace(hint))
+        {
+            message += $"\nHint: {hint}";
+        }
+
+        message += "\n\nYes = Open Logs\nNo = Open Output Folder\nCancel = OK";
+
+        var resultChoice = MessageBox.Show(
+            message,
+            "Analysis Error",
+            MessageBoxButton.YesNoCancel,
+            MessageBoxImage.Error);
+
+        if (resultChoice == MessageBoxResult.Yes)
+        {
+            Process.Start(new ProcessStartInfo("explorer.exe", logsDir) { UseShellExecute = true });
+        }
+        else if (resultChoice == MessageBoxResult.No)
+        {
+            Process.Start(new ProcessStartInfo("explorer.exe", outputDir) { UseShellExecute = true });
         }
     }
 
@@ -306,10 +323,6 @@ public partial class MainWindow : Window
     }
 
     private record ProfileRecord(string id, string name, string created_at);
-
-    private record ResultRecord(string status, OutputRecord? outputs);
-
-    private record OutputRecord(string overlay, string pose);
 }
 
 public static class EngineLocator
@@ -330,6 +343,18 @@ public static class EngineLocator
         }
 
         return null;
+    }
+
+    public static string GetAttemptedEnginePath()
+    {
+        var envPath = Environment.GetEnvironmentVariable("FIGHTING_OVERLAY_ENGINE_PATH");
+        if (!string.IsNullOrWhiteSpace(envPath))
+        {
+            return envPath;
+        }
+
+        var baseDir = AppDomain.CurrentDomain.BaseDirectory;
+        return Path.Combine(baseDir, "engine", "engine.exe");
     }
 }
 

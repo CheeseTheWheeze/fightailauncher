@@ -5,6 +5,8 @@ from pathlib import Path
 
 from imageio_ffmpeg import get_ffmpeg_exe
 
+from engine.errors import KnownError
+
 
 def resolve_ffmpeg_path(logger) -> str | None:
     try:
@@ -46,7 +48,12 @@ def render_overlay(video_path: Path, outputs_dir: Path, logger) -> dict:
         import cv2  # noqa: F401
         logger.info("OpenCV detected; fallback to direct copy for now.")
     except Exception as exc:
-        logger.warning("OpenCV not available: %s", exc)
+        logger.error("OpenCV not available: %s", exc)
+        raise KnownError(
+            "E_CV2_IMPORT",
+            "OpenCV import failed.",
+            "Engine bundle may be missing OpenCV DLLs. Use the Release zip; do not run from source.",
+        ) from exc
 
     shutil.copyfile(video_path, overlay_path)
     return {"overlay_path": str(overlay_path), "overlay_status": "copied"}

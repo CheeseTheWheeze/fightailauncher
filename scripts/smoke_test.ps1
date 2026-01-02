@@ -38,9 +38,21 @@ try {
     $clipId = "smoke-clip"
     $outputDir = Join-Path $tempRoot "outputs"
 
+    $resultJson = Join-Path $outputDir "result.json"
     & $EnginePath analyze --video $videoPath --athlete $athleteId --clip $clipId --outdir $outputDir
     if ($LASTEXITCODE -ne 0) {
         Write-Error "Engine exited with non-zero."
+        exit 1
+    }
+
+    if (-not (Test-Path $resultJson)) {
+        Write-Error "result.json missing"
+        exit 1
+    }
+
+    $payload = Get-Content $resultJson -Raw | ConvertFrom-Json
+    if ($payload.status -ne "ok") {
+        Write-Error "result.json status not ok"
         exit 1
     }
 
@@ -55,15 +67,30 @@ try {
         exit 1
     }
 
-    $resultJson = Join-Path $outputDir "result.json"
-    if (-not (Test-Path $resultJson)) {
-        Write-Error "result.json missing"
+    $negativeClipId = "smoke-clip-missing"
+    $negativeOutputDir = Join-Path $tempRoot "outputs-missing"
+    $missingVideo = Join-Path $tempRoot "does-not-exist.mp4"
+
+    & $EnginePath analyze --video $missingVideo --athlete $athleteId --clip $negativeClipId --outdir $negativeOutputDir
+    if ($LASTEXITCODE -ne 2) {
+        Write-Error "Engine missing-video run exited with $LASTEXITCODE (expected 2)."
         exit 1
     }
 
-    $payload = Get-Content $resultJson -Raw | ConvertFrom-Json
-    if ($payload.status -ne "ok") {
-        Write-Error "result.json status not ok"
+    $negativeResult = Join-Path $negativeOutputDir "result.json"
+    if (-not (Test-Path $negativeResult)) {
+        Write-Error "result.json missing for negative test"
+        exit 1
+    }
+
+    $negativePayload = Get-Content $negativeResult -Raw | ConvertFrom-Json
+    if ($negativePayload.status -ne "error") {
+        Write-Error "negative result.json status not error"
+        exit 1
+    }
+
+    if ($negativePayload.error.code -ne "E_VIDEO_MISSING") {
+        Write-Error "negative result.json error.code not E_VIDEO_MISSING"
         exit 1
     }
 

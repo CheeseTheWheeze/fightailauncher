@@ -4,7 +4,7 @@ using System.IO;
 
 namespace FightingOverlay.Desktop;
 
-public static class DesktopLogger
+public static class Logger
 {
     private static readonly string LogDirectoryPath = StoragePaths.LogsDir();
     private static readonly string LogFilePath = Path.Combine(LogDirectoryPath, "desktop.log");

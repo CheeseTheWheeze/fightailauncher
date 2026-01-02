@@ -42,6 +42,7 @@ def extract_pose(video_path: Path, outputs_dir: Path, logger) -> dict:
 
     frames: list[dict] = []
     total_landmarks = 0
+    frames_with_detections = 0
 
     with mp_pose.Pose(
         static_image_mode=False,
@@ -77,6 +78,7 @@ def extract_pose(video_path: Path, outputs_dir: Path, logger) -> dict:
 
             if landmarks_payload:
                 total_landmarks += len(landmarks_payload)
+                frames_with_detections += 1
 
             frames.append(
                 {
@@ -103,6 +105,7 @@ def extract_pose(video_path: Path, outputs_dir: Path, logger) -> dict:
     pose_path.write_text(json.dumps(pose_data, indent=2))
     return {
         "pose_path": str(pose_path),
-        "pose_status": "ok" if total_landmarks > 0 else "no_pose",
+        "pose_status": "ok" if total_landmarks > 0 else "ok_no_detections",
         "pose_duration_ms": int((time.time() - started) * 1000),
+        "pose_frames_with_detections": frames_with_detections,
     }

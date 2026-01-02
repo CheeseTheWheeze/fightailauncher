@@ -138,8 +138,16 @@ def analyze(args: argparse.Namespace) -> int:
             "total": int((time.time() - started) * 1000),
             "pose": pose_result["pose_duration_ms"],
         }
-        result["pose_extraction"] = {"status": pose_result["pose_status"]}
-        result["overlay"] = {"status": overlay_result["overlay_status"]}
+        result["pose_extraction"] = {
+            "status": pose_result["pose_status"],
+            "frames_with_detections": pose_result.get("pose_frames_with_detections", 0),
+        }
+        result["overlay"] = {
+            "status": overlay_result["overlay_status"],
+            "bytes": overlay_result.get("overlay_bytes", 0),
+        }
+        result["pose_frames_with_detections"] = pose_result.get("pose_frames_with_detections", 0)
+        result["overlay_bytes"] = overlay_result.get("overlay_bytes", 0)
 
         write_result_ok(result)
         exit_code = 0

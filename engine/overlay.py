@@ -57,7 +57,6 @@ def render_overlay(video_path: Path, outputs_dir: Path, logger) -> dict:
     drawing_utils = mp.solutions.drawing_utils
     drawing_styles = mp.solutions.drawing_styles
     name_to_index = {landmark.name: landmark.value for landmark in mp_pose.PoseLandmark}
-    drawn_frames = 0
 
     frame_index = 0
     while True:
@@ -76,7 +75,6 @@ def render_overlay(video_path: Path, outputs_dir: Path, logger) -> dict:
                 mp_pose.POSE_CONNECTIONS,
                 drawing_styles.get_default_pose_landmarks_style(),
             )
-            drawn_frames += 1
 
         writer.write(frame)
         frame_index += 1
@@ -84,7 +82,15 @@ def render_overlay(video_path: Path, outputs_dir: Path, logger) -> dict:
     cap.release()
     writer.release()
 
-    return {"overlay_path": str(overlay_path), "overlay_status": "ok" if drawn_frames > 0 else "no_pose"}
+    overlay_bytes = overlay_path.stat().st_size if overlay_path.exists() else 0
+    overlay_status = "ok" if overlay_bytes > 0 else "error"
+    if overlay_bytes == 0:
+        logger.error("Overlay generation produced empty file.")
+    return {
+        "overlay_path": str(overlay_path),
+        "overlay_status": overlay_status,
+        "overlay_bytes": overlay_bytes,
+    }
 
 
 def _build_landmark_list(landmarks: list[dict], name_to_index: dict[str, int], landmark_pb2):

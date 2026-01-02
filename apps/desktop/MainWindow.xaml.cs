@@ -161,7 +161,6 @@ public partial class MainWindow : Window
         _lastEngineVersion = result.Version ?? "unknown";
         EngineVersionText.Text = $"Engine version: {_lastEngineVersion}";
 
-        LoadAssignments(result);
         LoadRunHistory();
 
         if (result.Status == "ok")
@@ -211,21 +210,6 @@ public partial class MainWindow : Window
         finally
         {
             UpdateButton.IsEnabled = true;
-        }
-    }
-
-    private void LoadAssignments(EngineRunResult result)
-    {
-        AssignmentsList.Items.Clear();
-        if (result.AssignedProfiles == null || result.AssignedProfiles.Count == 0)
-        {
-            AssignmentsList.Items.Add("No assigned profiles yet.");
-            return;
-        }
-
-        foreach (var assignment in result.AssignedProfiles)
-        {
-            AssignmentsList.Items.Add($"{assignment.TrackId} -> {assignment.ProfileId}");
         }
     }
 

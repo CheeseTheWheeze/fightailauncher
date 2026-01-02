@@ -1,3 +1,5 @@
 imageio-ffmpeg==0.4.9
+mediapipe==0.10.14
 numpy<2
 opencv-python==4.9.0.80
+protobuf<5

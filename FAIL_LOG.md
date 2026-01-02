@@ -19,3 +19,9 @@ Track recurring failures and mitigations to avoid regressions.
 - **Root cause:** Overlay renderer copied video; pose extractor defaulted to stub output when MediaPipe was missing.
 - **Fix:** Implement real MediaPipe pose extraction, draw skeleton overlays, and fail loudly if MediaPipe is missing.
 - **Prevention:** Keep pose extraction as required dependency and ensure overlay renderer always draws joints/bones.
+
+## 2025-02-20
+- **Symptom:** Overlay rendered but showed no skeleton.
+- **Root cause:** MediaPipe was not bundled into the engine build and overlay generation reused the input frames.
+- **Fix:** Bundle MediaPipe, implement MediaPipe pose extraction, and draw skeleton landmarks/bones in overlay output.
+- **Prevention:** Smoke test asserts pose landmarks are present and overlay_status is ok.

@@ -18,15 +18,15 @@ public class EngineRunner
         _engineInfo = engineInfo;
     }
 
-    public async Task<EngineRunResult> RunAnalyzeAsync(string videoPath, string athleteId, string clipId, Action<string> appendLog)
+    public async Task<EngineRunResult> RunAnalyzeAsync(string videoPath, string runId, Action<string> appendLog)
     {
-        var clipPaths = StoragePaths.GetClipPaths(athleteId, clipId);
-        Directory.CreateDirectory(clipPaths.InputDir);
-        Directory.CreateDirectory(clipPaths.OutputsDir);
-        Directory.CreateDirectory(clipPaths.LogsDir);
+        var runPaths = StoragePaths.GetRunPaths(runId);
+        Directory.CreateDirectory(runPaths.InputDir);
+        Directory.CreateDirectory(runPaths.OutputsDir);
+        Directory.CreateDirectory(runPaths.LogsDir);
 
-        var outputsDir = clipPaths.OutputsDir;
-        var logsDir = clipPaths.LogsDir;
+        var outputsDir = runPaths.OutputsDir;
+        var logsDir = runPaths.LogsDir;
         var resultPath = Path.Combine(outputsDir, "result.json");
         var stdout = new StringBuilder();
         var stderr = new StringBuilder();
@@ -34,7 +34,7 @@ public class EngineRunner
         var startInfo = new ProcessStartInfo
         {
             FileName = _engineInfo.EnginePath,
-            Arguments = BuildArgs(videoPath, athleteId, clipId, outputsDir),
+            Arguments = BuildArgs(videoPath, runId, outputsDir),
             WorkingDirectory = AppDomain.CurrentDomain.BaseDirectory,
             UseShellExecute = false,
             RedirectStandardOutput = true,
@@ -129,9 +129,9 @@ public class EngineRunner
             stderr.ToString());
     }
 
-    private static string BuildArgs(string videoPath, string athleteId, string clipId, string outputsDir)
+    private static string BuildArgs(string videoPath, string runId, string outputsDir)
     {
-        return $"analyze --video \"{videoPath}\" --athlete {athleteId} --clip {clipId} --outdir \"{outputsDir}\"";
+        return $"analyze --video \"{videoPath}\" --run-id {runId} --outdir \"{outputsDir}\"";
     }
 
     private static void AppendLine(StringBuilder builder, string line)
@@ -180,7 +180,8 @@ public class EngineRunner
                 EngineLog = "engine.log",
                 LogsDir = logsDir,
                 DesktopLog = Logger.LogFile
-            }
+            },
+            RunId = null
         };
 
         Directory.CreateDirectory(outputsDir);

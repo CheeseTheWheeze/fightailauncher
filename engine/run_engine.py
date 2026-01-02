@@ -14,6 +14,7 @@ if str(REPO_ROOT) not in sys.path:
 from engine.errors import KnownError  # noqa: E402
 from engine.overlay import render_overlay  # noqa: E402
 from engine.pose import extract_pose  # noqa: E402
+from engine.profile_pool import assign_tracks_to_profiles  # noqa: E402
 from engine.result_contract import (  # noqa: E402
     ResultStatus,
     safe_write_json,
@@ -21,10 +22,10 @@ from engine.result_contract import (  # noqa: E402
     write_result_ok,
 )
 from shared.storage_paths import (  # noqa: E402
-    ensure_clip_dirs,
     ensure_global_dirs,
-    get_clip_paths,
+    ensure_run_dirs,
     get_global_paths,
+    get_run_paths,
 )
 
 
@@ -58,23 +59,23 @@ def read_version() -> str:
 
 
 def resolve_outputs_logs(args: argparse.Namespace):
-    clip_paths = get_clip_paths(args.athlete, args.clip)
-    ensure_clip_dirs(clip_paths)
+    run_paths = get_run_paths(args.run_id)
+    ensure_run_dirs(run_paths)
 
-    outputs_dir = Path(args.outdir) if args.outdir else clip_paths.outputs_dir
+    outputs_dir = Path(args.outdir) if args.outdir else run_paths.outputs_dir
     outputs_dir.mkdir(parents=True, exist_ok=True)
 
-    logs_dir = clip_paths.logs_dir
+    logs_dir = run_paths.logs_dir
     if args.outdir:
         logs_dir = Path(args.outdir).parent / "logs"
     logs_dir.mkdir(parents=True, exist_ok=True)
 
-    return clip_paths, outputs_dir, logs_dir
+    return run_paths, outputs_dir, logs_dir
 
 
 def analyze(args: argparse.Namespace) -> int:
     started = time.time()
-    clip_paths, outputs_dir, logs_dir = resolve_outputs_logs(args)
+    run_paths, outputs_dir, logs_dir = resolve_outputs_logs(args)
     global_paths = get_global_paths()
     ensure_global_dirs(global_paths)
 
@@ -85,12 +86,12 @@ def analyze(args: argparse.Namespace) -> int:
     video_path = Path(args.video)
     result = {
         "status": ResultStatus.ERROR,
+        "run_id": args.run_id,
         "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "version": read_version(),
         "inputs": {
             "video": str(video_path),
-            "athlete_id": args.athlete,
-            "clip_id": args.clip,
+            "run_id": args.run_id,
         },
         "outputs": {
             "overlay_mp4": "overlay.mp4",
@@ -103,12 +104,13 @@ def analyze(args: argparse.Namespace) -> int:
             "engine_log": "engine.log",
             "logs_dir": str(logs_dir),
         },
+        "assigned_profiles": [],
         "warnings": [],
     }
 
     exit_code = 3
     try:
-        logger.info("Starting analysis for athlete=%s clip=%s", args.athlete, args.clip)
+        logger.info("Starting analysis for run_id=%s", args.run_id)
 
         if not video_path.exists():
             raise KnownError(
@@ -124,23 +126,23 @@ def analyze(args: argparse.Namespace) -> int:
                 f"Check the path: {video_path}",
             )
 
-        input_copy = clip_paths.input_dir / video_path.name
+        input_copy = run_paths.input_dir / video_path.name
         if input_copy.resolve() != video_path.resolve():
             shutil.copyfile(video_path, input_copy)
 
         pose_result = extract_pose(video_path, outputs_dir, logger)
         overlay_result = render_overlay(video_path, outputs_dir, logger)
+        assigned_profiles = assign_tracks_to_profiles(video_path, outputs_dir / "pose.json", logger)
 
         result["outputs"]["pose_json"] = _relative_to(outputs_dir, pose_result["pose_path"])
         result["outputs"]["overlay_mp4"] = _relative_to(outputs_dir, overlay_result["overlay_path"])
+        result["assigned_profiles"] = assigned_profiles
         result["timings_ms"] = {
             "total": int((time.time() - started) * 1000),
             "pose": pose_result["pose_duration_ms"],
         }
-        result["details"] = {
-            "pose_status": pose_result["pose_status"],
-            "overlay_status": overlay_result["overlay_status"],
-        }
+        result["pose_extraction"] = {"status": pose_result["pose_status"]}
+        result["overlay"] = {"status": overlay_result["overlay_status"]}
 
         write_result_ok(result)
         exit_code = 0
@@ -194,8 +196,7 @@ def main() -> int:
 
     analyze_parser = subparsers.add_parser("analyze", help="Analyze a video")
     analyze_parser.add_argument("--video", required=True)
-    analyze_parser.add_argument("--athlete", required=True)
-    analyze_parser.add_argument("--clip", required=True)
+    analyze_parser.add_argument("--run-id", required=True)
     analyze_parser.add_argument("--outdir", required=False)
     analyze_parser.add_argument("--model", required=False)
 

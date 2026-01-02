@@ -2,7 +2,6 @@ using Microsoft.Win32;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
-using System.Text.Json;
 using System.Windows;
 
 namespace FightingOverlay.Desktop;
@@ -19,30 +18,40 @@ public partial class MainWindow : Window
         InitializeComponent();
         Directory.CreateDirectory(StoragePaths.BaseDataDir());
         Directory.CreateDirectory(StoragePaths.LogsDir());
-        LoadProfiles();
+        Directory.CreateDirectory(StoragePaths.RunsDir());
+        LoadRunHistory();
         LoadVersion();
         LoadDiagnostics();
     }
 
-    private void LoadProfiles()
+    private void LoadRunHistory()
     {
-        ProfileComboBox.Items.Clear();
-        var profilesDir = StoragePaths.ProfilesDir();
-        Directory.CreateDirectory(profilesDir);
-        foreach (var profilePath in Directory.EnumerateFiles(profilesDir, "profile.json", SearchOption.AllDirectories))
+        RunHistoryList.Items.Clear();
+        var runsDir = StoragePaths.RunsDir();
+        Directory.CreateDirectory(runsDir);
+
+        var runDirs = Directory.EnumerateDirectories(runsDir)
+            .OrderByDescending(path => Directory.GetCreationTimeUtc(path))
+            .Take(10);
+
+        foreach (var runDir in runDirs)
         {
+            var resultPath = Path.Combine(runDir, "outputs", "result.json");
+            if (!File.Exists(resultPath))
+            {
+                continue;
+            }
+
             try
             {
-                var json = File.ReadAllText(profilePath);
-                var profile = JsonSerializer.Deserialize<ProfileRecord>(json);
-                if (profile != null)
-                {
-                    ProfileComboBox.Items.Add(new ProfileItem(profile.id, profile.name));
-                }
+                var json = File.ReadAllText(resultPath);
+                var result = EngineRunResult.FromJson(json);
+                var display = $"{Path.GetFileName(runDir)} - {result.Status}";
+                RunHistoryList.Items.Add(display);
             }
             catch (Exception ex)
             {
-                AppendLog($"Failed to load profile: {ex.Message}");
+                AppendLog($"Failed to load run history: {ex.Message}");
             }
         }
     }
@@ -107,23 +116,6 @@ public partial class MainWindow : Window
         }
     }
 
-    private void OnNewProfile(object sender, RoutedEventArgs e)
-    {
-        var name = Microsoft.VisualBasic.Interaction.InputBox("Enter athlete name", "New Profile", "Athlete");
-        if (string.IsNullOrWhiteSpace(name))
-        {
-            return;
-        }
-
-        var athleteId = Guid.NewGuid().ToString("N");
-        var profileDir = Path.Combine(StoragePaths.ProfilesDir(), athleteId);
-        Directory.CreateDirectory(profileDir);
-        var profile = new ProfileRecord(athleteId, name, DateTime.UtcNow.ToString("O"));
-        File.WriteAllText(Path.Combine(profileDir, "profile.json"), JsonSerializer.Serialize(profile, new JsonSerializerOptions { WriteIndented = true }));
-        LoadProfiles();
-        ProfileComboBox.SelectedItem = ProfileComboBox.Items.OfType<ProfileItem>().FirstOrDefault(item => item.Id == athleteId);
-    }
-
     private async void OnAnalyze(object sender, RoutedEventArgs e)
     {
         var videoPath = VideoPathTextBox.Text.Trim();
@@ -132,23 +124,18 @@ public partial class MainWindow : Window
             MessageBox.Show("Please select a video file.");
             return;
         }
-        if (ProfileComboBox.SelectedItem is not ProfileItem profile)
-        {
-            MessageBox.Show("Please select an athlete profile.");
-            return;
-        }
 
-        var clipId = Guid.NewGuid().ToString("N");
-        var clipPaths = StoragePaths.GetClipPaths(profile.Id, clipId);
-        Directory.CreateDirectory(clipPaths.InputDir);
-        Directory.CreateDirectory(clipPaths.OutputsDir);
-        Directory.CreateDirectory(clipPaths.LogsDir);
+        var runId = Guid.NewGuid().ToString("N");
+        var runPaths = StoragePaths.GetRunPaths(runId);
+        Directory.CreateDirectory(runPaths.InputDir);
+        Directory.CreateDirectory(runPaths.OutputsDir);
+        Directory.CreateDirectory(runPaths.LogsDir);
 
-        _lastOutputDir = clipPaths.OutputsDir;
-        _lastLogsDir = clipPaths.LogsDir;
+        _lastOutputDir = runPaths.OutputsDir;
+        _lastLogsDir = runPaths.LogsDir;
         OpenOutputButton.IsEnabled = false;
-        OutputDirText.Text = $"Output folder: {clipPaths.OutputsDir}";
-        AppendLog($"Starting analysis for {profile.Name} (clip {clipId})");
+        OutputDirText.Text = $"Output folder: {runPaths.OutputsDir}";
+        AppendLog($"Starting analysis for run {runId}");
 
         var engineInfo = EngineLocator.ResolveEngine();
         if (engineInfo == null)
@@ -162,7 +149,7 @@ public partial class MainWindow : Window
         EngineRunResult result;
         try
         {
-            result = await runner.RunAnalyzeAsync(videoPath, profile.Id, clipId, AppendLog);
+            result = await runner.RunAnalyzeAsync(videoPath, runId, AppendLog);
         }
         catch (Exception ex)
         {
@@ -174,10 +161,13 @@ public partial class MainWindow : Window
         _lastEngineVersion = result.Version ?? "unknown";
         EngineVersionText.Text = $"Engine version: {_lastEngineVersion}";
 
+        LoadAssignments(result);
+        LoadRunHistory();
+
         if (result.Status == "ok")
         {
             OpenOutputButton.IsEnabled = true;
-            var overlayPath = result.ResolveOverlayPath(clipPaths.OutputsDir);
+            var overlayPath = result.ResolveOverlayPath(runPaths.OutputsDir);
             if (!string.IsNullOrWhiteSpace(overlayPath))
             {
                 LoadOverlay(overlayPath);
@@ -189,7 +179,7 @@ public partial class MainWindow : Window
         }
         else
         {
-            ShowEngineError(result, clipPaths.OutputsDir, clipPaths.LogsDir);
+            ShowEngineError(result, runPaths.OutputsDir, runPaths.LogsDir);
         }
     }
 
@@ -221,6 +211,21 @@ public partial class MainWindow : Window
         finally
         {
             UpdateButton.IsEnabled = true;
+        }
+    }
+
+    private void LoadAssignments(EngineRunResult result)
+    {
+        AssignmentsList.Items.Clear();
+        if (result.AssignedProfiles == null || result.AssignedProfiles.Count == 0)
+        {
+            AssignmentsList.Items.Add("No assigned profiles yet.");
+            return;
+        }
+
+        foreach (var assignment in result.AssignedProfiles)
+        {
+            AssignmentsList.Items.Add($"{assignment.TrackId} -> {assignment.ProfileId}");
         }
     }
 
@@ -316,13 +321,6 @@ public partial class MainWindow : Window
             Process.Start(new ProcessStartInfo("explorer.exe", outputDir) { UseShellExecute = true });
         }
     }
-
-    private record ProfileItem(string Id, string Name)
-    {
-        public override string ToString() => Name;
-    }
-
-    private record ProfileRecord(string id, string name, string created_at);
 }
 
 public static class EngineLocator

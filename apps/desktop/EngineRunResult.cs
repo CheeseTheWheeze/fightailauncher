@@ -26,6 +26,9 @@ public class EngineRunResult
     [JsonPropertyName("version")]
     public string? Version { get; set; }
 
+    [JsonPropertyName("run_id")]
+    public string? RunId { get; set; }
+
     [JsonPropertyName("started_at")]
     public string? StartedAt { get; set; }
 
@@ -34,6 +37,9 @@ public class EngineRunResult
 
     [JsonPropertyName("warnings")]
     public List<string>? Warnings { get; set; }
+
+    [JsonPropertyName("assigned_profiles")]
+    public List<AssignedProfile>? AssignedProfiles { get; set; }
 
     [JsonPropertyName("stdout")]
     public string? Stdout { get; set; }
@@ -80,6 +86,15 @@ public class EngineRunResult
 
         return Path.Combine(outputsDir, overlay);
     }
+}
+
+public class AssignedProfile
+{
+    [JsonPropertyName("track_id")]
+    public string? TrackId { get; set; }
+
+    [JsonPropertyName("profile_id")]
+    public string? ProfileId { get; set; }
 }
 
 public class EngineRunError
@@ -132,9 +147,6 @@ public class EngineRunInputs
     [JsonPropertyName("video")]
     public string? Video { get; set; }
 
-    [JsonPropertyName("athlete_id")]
-    public string? AthleteId { get; set; }
-
-    [JsonPropertyName("clip_id")]
-    public string? ClipId { get; set; }
+    [JsonPropertyName("run_id")]
+    public string? RunId { get; set; }
 }

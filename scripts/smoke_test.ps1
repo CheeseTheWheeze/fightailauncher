@@ -34,12 +34,11 @@ try {
         exit 1
     }
 
-    $athleteId = "smoke-athlete"
-    $clipId = "smoke-clip"
+    $runId = "smoke-run"
     $outputDir = Join-Path $tempRoot "outputs"
 
     $resultJson = Join-Path $outputDir "result.json"
-    & $EnginePath analyze --video $videoPath --athlete $athleteId --clip $clipId --outdir $outputDir
+    & $EnginePath analyze --video $videoPath --run-id $runId --outdir $outputDir
     if ($LASTEXITCODE -ne 0) {
         Write-Error "Engine exited with non-zero."
         exit 1
@@ -67,11 +66,29 @@ try {
         exit 1
     }
 
-    $negativeClipId = "smoke-clip-missing"
+    $poseJson = Join-Path $outputDir "pose.json"
+    if (-not (Test-Path $poseJson)) {
+        Write-Error "pose.json missing"
+        exit 1
+    }
+
+    $posePayload = Get-Content $poseJson -Raw | ConvertFrom-Json
+    if (-not $posePayload.tracks -or $posePayload.tracks.Count -eq 0) {
+        Write-Error "pose.json tracks empty"
+        exit 1
+    }
+
+    $firstTrack = $posePayload.tracks[0]
+    if (-not $firstTrack.frames -or $firstTrack.frames.Count -eq 0) {
+        Write-Error "pose.json frames empty"
+        exit 1
+    }
+
+    $negativeRunId = "smoke-run-missing"
     $negativeOutputDir = Join-Path $tempRoot "outputs-missing"
     $missingVideo = Join-Path $tempRoot "does-not-exist.mp4"
 
-    & $EnginePath analyze --video $missingVideo --athlete $athleteId --clip $negativeClipId --outdir $negativeOutputDir
+    & $EnginePath analyze --video $missingVideo --run-id $negativeRunId --outdir $negativeOutputDir
     if ($LASTEXITCODE -ne 2) {
         Write-Error "Engine missing-video run exited with $LASTEXITCODE (expected 2)."
         exit 1

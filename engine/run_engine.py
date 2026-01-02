@@ -146,6 +146,9 @@ def analyze(args: argparse.Namespace) -> int:
             "status": overlay_result["overlay_status"],
             "bytes": overlay_result.get("overlay_bytes", 0),
         }
+        result["pose_status"] = pose_result["pose_status"]
+        result["overlay_status"] = overlay_result["overlay_status"]
+        result["pose_metrics"] = pose_result.get("pose_metrics", {})
         result["pose_frames_with_detections"] = pose_result.get("pose_frames_with_detections", 0)
         result["overlay_bytes"] = overlay_result.get("overlay_bytes", 0)
 

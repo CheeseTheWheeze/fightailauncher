@@ -59,6 +59,7 @@ def render_overlay(video_path: Path, outputs_dir: Path, logger) -> dict:
     name_to_index = {landmark.name: landmark.value for landmark in mp_pose.PoseLandmark}
 
     frame_index = 0
+    predicted_drawn = False
     while True:
         success, frame = cap.read()
         if not success:
@@ -68,16 +69,39 @@ def render_overlay(video_path: Path, outputs_dir: Path, logger) -> dict:
             landmarks = track_frame.get("landmarks", [])
             if not landmarks:
                 continue
+            is_predicted = bool(track_frame.get("is_predicted"))
             landmark_list = _build_landmark_list(landmarks, name_to_index, landmark_pb2)
-            drawing_utils.draw_landmarks(
-                frame,
-                landmark_list,
-                mp_pose.POSE_CONNECTIONS,
-                drawing_styles.get_default_pose_landmarks_style(),
-            )
+            if is_predicted:
+                predicted_drawn = True
+                drawing_utils.draw_landmarks(
+                    frame,
+                    landmark_list,
+                    mp_pose.POSE_CONNECTIONS,
+                    drawing_utils.DrawingSpec(color=(0, 255, 255), thickness=1, circle_radius=1),
+                    drawing_utils.DrawingSpec(color=(0, 200, 200), thickness=1, circle_radius=1),
+                )
+            else:
+                drawing_utils.draw_landmarks(
+                    frame,
+                    landmark_list,
+                    mp_pose.POSE_CONNECTIONS,
+                    drawing_styles.get_default_pose_landmarks_style(),
+                )
 
+        if predicted_drawn:
+            cv2.putText(
+                frame,
+                "PRED",
+                (10, 30),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                1.0,
+                (0, 255, 255),
+                2,
+                cv2.LINE_AA,
+            )
         writer.write(frame)
         frame_index += 1
+        predicted_drawn = False
 
     cap.release()
     writer.release()

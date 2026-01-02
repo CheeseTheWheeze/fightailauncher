@@ -51,6 +51,7 @@
             <StackPanel Grid.Column="1">
                 <TextBlock Text="Overlay Preview" FontWeight="Bold" />
                 <MediaElement x:Name="PreviewPlayer" Height="350" LoadedBehavior="Manual" UnloadedBehavior="Stop" />
+                <TextBlock x:Name="OverlayStatusText" Foreground="DarkRed" Margin="0,8,0,0" TextWrapping="Wrap" />
             </StackPanel>
         </Grid>
 

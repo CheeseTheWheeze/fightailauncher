@@ -2,6 +2,7 @@ using Microsoft.Win32;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Threading.Tasks;
 using System.Windows;
 
 namespace FightingOverlay.Desktop;
@@ -134,6 +135,7 @@ public partial class MainWindow : Window
         _lastOutputDir = runPaths.OutputsDir;
         _lastLogsDir = runPaths.LogsDir;
         OpenOutputButton.IsEnabled = false;
+        OverlayStatusText.Text = string.Empty;
         OutputDirText.Text = $"Output folder: {runPaths.OutputsDir}";
         AppendLog($"Starting analysis for run {runId}");
 
@@ -169,11 +171,18 @@ public partial class MainWindow : Window
             var overlayPath = result.ResolveOverlayPath(runPaths.OutputsDir);
             if (!string.IsNullOrWhiteSpace(overlayPath))
             {
-                LoadOverlay(overlayPath);
+                var loaded = await TryLoadOverlayAsync(overlayPath);
+                if (!loaded)
+                {
+                    OverlayStatusText.Text = "Overlay preview failed to load. Use Open Output Folder to review files.";
+                    OpenOutputButton.IsEnabled = true;
+                }
             }
             else
             {
                 AppendLog("Overlay path missing in result.json.");
+                OverlayStatusText.Text = "Overlay preview missing. Use Open Output Folder to review files.";
+                OpenOutputButton.IsEnabled = true;
             }
         }
         else
@@ -213,17 +222,37 @@ public partial class MainWindow : Window
         }
     }
 
-    private void LoadOverlay(string overlayPath)
+    private async Task<bool> TryLoadOverlayAsync(string overlayPath)
     {
         if (!File.Exists(overlayPath))
         {
             AppendLog("Overlay video not found.");
-            return;
+            return false;
         }
 
+        var fileInfo = new FileInfo(overlayPath);
+        var sizeBefore = fileInfo.Length;
+        await Task.Delay(500);
+        fileInfo.Refresh();
+        var sizeAfter = fileInfo.Length;
+        var isStable = sizeBefore == sizeAfter && sizeAfter > 0;
+        AppendLog($"Overlay file exists at {overlayPath} size={sizeAfter} stable={isStable}");
+        if (!isStable)
+        {
+            return false;
+        }
+
+        LoadOverlay(overlayPath);
+        return true;
+    }
+
+    private void LoadOverlay(string overlayPath)
+    {
         PreviewPlayer.Stop();
+        PreviewPlayer.Source = null;
         PreviewPlayer.Source = new Uri(overlayPath);
         PreviewPlayer.Play();
+        OverlayStatusText.Text = string.Empty;
         AppendLog("Overlay loaded.");
     }
 

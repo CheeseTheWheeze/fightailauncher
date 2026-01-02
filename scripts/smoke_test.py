@@ -9,7 +9,8 @@ from pathlib import Path
 
 def main() -> int:
     repo_root = Path(__file__).resolve().parents[1]
-    engine = repo_root / "engine" / "run_engine.py"
+    engine_exe = repo_root / "dist" / "engine" / "engine.exe"
+    engine_py = repo_root / "engine" / "run_engine.py"
     sample_dir = Path(tempfile.mkdtemp(prefix="fight-overlay-smoke-"))
     try:
         video_path = sample_dir / "sample.mp4"
@@ -19,23 +20,22 @@ def main() -> int:
         clip_id = "smoke-clip"
         output_dir = sample_dir / "outputs"
 
-        result = subprocess.run(
-            [
-                sys.executable,
-                str(engine),
-                "analyze",
-                "--video",
-                str(video_path),
-                "--athlete",
-                athlete_id,
-                "--clip",
-                clip_id,
-                "--outdir",
-                str(output_dir),
-            ],
-            capture_output=True,
-            text=True,
-        )
+        command = [
+            "analyze",
+            "--video",
+            str(video_path),
+            "--athlete",
+            athlete_id,
+            "--clip",
+            clip_id,
+            "--outdir",
+            str(output_dir),
+        ]
+        if engine_exe.exists():
+            args = [str(engine_exe)] + command
+        else:
+            args = [sys.executable, str(engine_py)] + command
+        result = subprocess.run(args, capture_output=True, text=True)
         print(result.stdout)
         print(result.stderr, file=sys.stderr)
 
@@ -52,8 +52,8 @@ def main() -> int:
             print("result.json missing")
             return 1
         payload = json.loads(result_json.read_text())
-        if payload.get("status") != "success":
-            print("result.json status not success")
+        if payload.get("status") != "ok":
+            print("result.json status not ok")
             return 1
         print("Smoke test passed")
         return 0

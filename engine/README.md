@@ -5,6 +5,14 @@ The engine is a Python CLI responsible for pose extraction, overlay rendering, a
 
 ## CLI
 ```bash
+engine.exe analyze \
+  --video "C:\path\video.mp4" \
+  --athlete "athlete_id" \
+  --clip "clip_id" \
+  --outdir "C:\path\outputs"
+```
+
+```bash
 python engine/run_engine.py analyze \
   --video "C:\path\video.mp4" \
   --athlete "athlete_id" \
@@ -29,8 +37,8 @@ logs/
 ```
 
 ## Dependencies
+- OpenCV (bundled in engine.exe)
+- FFmpeg (bundled in engine.exe via imageio-ffmpeg)
 - MediaPipe (optional)
-- OpenCV (optional)
-- FFmpeg (optional)
 
 If optional dependencies are missing, the engine produces stub outputs so UI flow remains testable.

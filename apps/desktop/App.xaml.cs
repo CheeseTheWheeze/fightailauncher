@@ -11,6 +11,12 @@ public partial class App : Application
 
         try
         {
+            if (Array.Exists(e.Args, arg => string.Equals(arg, "--installed-run", StringComparison.OrdinalIgnoreCase)))
+            {
+                Logger.Log("Skipping EnsureInstalled due to --installed-run flag.");
+            }
+            else
+            {
             var result = AppInstaller.EnsureInstalled();
             if (result.RelaunchStarted)
             {
@@ -22,6 +28,7 @@ public partial class App : Application
             {
                 Logger.Log($"Startup install/relaunch failed: {result.ErrorMessage}");
                 ShowStartupError($"Install/relaunch failed: {result.ErrorMessage}");
+            }
             }
         }
         catch (Exception ex)

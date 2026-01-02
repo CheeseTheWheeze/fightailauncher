@@ -6,16 +6,46 @@ namespace FightingOverlay.Desktop;
 
 public static class AppInstaller
 {
+    private static readonly TimeSpan InstallFailureBackoff = TimeSpan.FromHours(24);
+
     public static InstallResult EnsureInstalled()
     {
         try
         {
-            var baseDir = Path.GetFullPath(AppDomain.CurrentDomain.BaseDirectory);
-            var currentDir = Path.GetFullPath(AppPaths.CurrentDir());
+            var exePath = Process.GetCurrentProcess().MainModule?.FileName;
+            if (string.IsNullOrWhiteSpace(exePath))
+            {
+                return new InstallResult(true, false, "Unable to determine exe path");
+            }
 
-            if (baseDir.StartsWith(currentDir + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            var runDir = Path.GetFullPath(Path.GetDirectoryName(exePath)!);
+            var currentDir = Path.GetFullPath(AppPaths.CurrentDir());
+            var versionsDir = Path.GetFullPath(AppPaths.VersionsDir());
+
+            var currentPrefix = currentDir.EndsWith(Path.DirectorySeparatorChar)
+                ? currentDir
+                : currentDir + Path.DirectorySeparatorChar;
+            var versionsPrefix = versionsDir.EndsWith(Path.DirectorySeparatorChar)
+                ? versionsDir
+                : versionsDir + Path.DirectorySeparatorChar;
+
+            if (string.Equals(runDir, currentDir, StringComparison.OrdinalIgnoreCase) ||
+                runDir.StartsWith(currentPrefix, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(runDir, versionsDir, StringComparison.OrdinalIgnoreCase) ||
+                runDir.StartsWith(versionsPrefix, StringComparison.OrdinalIgnoreCase))
             {
                 return new InstallResult(false, false, null);
+            }
+
+            var failureMarker = Path.Combine(AppPaths.AppRoot(), "install_failed.txt");
+            if (File.Exists(failureMarker))
+            {
+                var lastWrite = File.GetLastWriteTimeUtc(failureMarker);
+                if (DateTime.UtcNow - lastWrite <= InstallFailureBackoff)
+                {
+                    Logger.Log("Skipping install due to prior failure marker.");
+                    return new InstallResult(false, false, null);
+                }
             }
 
             var version = VersionInfo.ReadVersion();
@@ -24,13 +54,22 @@ public static class AppInstaller
 
             if (!Directory.Exists(targetDir))
             {
-                CopyDirectory(baseDir, targetDir);
+                CopyDirectory(runDir, targetDir);
             }
 
             var junctionResult = CreateJunction(AppPaths.CurrentDir(), targetDir);
             if (!junctionResult.Success)
             {
+                Directory.CreateDirectory(AppPaths.AppRoot());
+                File.WriteAllText(
+                    failureMarker,
+                    $"{DateTime.UtcNow:O} {junctionResult.ErrorMessage ?? "Unknown error"}");
                 return new InstallResult(true, false, junctionResult.ErrorMessage);
+            }
+
+            if (File.Exists(failureMarker))
+            {
+                File.Delete(failureMarker);
             }
 
             var exeName = Path.GetFileName(Process.GetCurrentProcess().MainModule?.FileName ?? "FightAILauncher.exe");
@@ -48,6 +87,7 @@ public static class AppInstaller
                 {
                     FileName = targetExe,
                     WorkingDirectory = targetDir,
+                    Arguments = "--installed-run",
                     UseShellExecute = true
                 });
                 if (process == null)
@@ -76,13 +116,48 @@ public static class AppInstaller
     {
         if (Directory.Exists(junctionPath))
         {
-            try
+            var removeInfo = new ProcessStartInfo
             {
-                Directory.Delete(junctionPath, recursive: true);
+                FileName = "cmd.exe",
+                Arguments = $"/c rmdir /S /Q \"{junctionPath}\"",
+                CreateNoWindow = true,
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true
+            };
+            using var removeProcess = Process.Start(removeInfo);
+            if (removeProcess != null)
+            {
+                removeProcess.WaitForExit();
+                var removeOut = removeProcess.StandardOutput.ReadToEnd();
+                var removeErr = removeProcess.StandardError.ReadToEnd();
+                if (!string.IsNullOrWhiteSpace(removeOut))
+                {
+                    Logger.Log($"rmdir output: {removeOut}");
+                }
+                if (!string.IsNullOrWhiteSpace(removeErr))
+                {
+                    Logger.Log($"rmdir error: {removeErr}");
+                }
+                if (removeProcess.ExitCode != 0)
+                {
+                    Logger.Log($"rmdir exited with code {removeProcess.ExitCode}.");
+                }
             }
-            catch
+
+            if (Directory.Exists(junctionPath))
             {
-                Logger.Log($"Failed to delete existing junction at {junctionPath}.");
+                var timestamp = DateTime.UtcNow.ToString("yyyyMMddHHmmss");
+                var backupPath = $"{junctionPath}_old_{timestamp}";
+                try
+                {
+                    Directory.Move(junctionPath, backupPath);
+                    Logger.Log($"Renamed existing junction to {backupPath}.");
+                }
+                catch (Exception ex)
+                {
+                    Logger.Log($"Failed to rename existing junction at {junctionPath}: {ex.Message}");
+                }
             }
         }
 
@@ -91,7 +166,9 @@ public static class AppInstaller
             FileName = "cmd.exe",
             Arguments = $"/c mklink /J \"{junctionPath}\" \"{targetPath}\"",
             CreateNoWindow = true,
-            UseShellExecute = false
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
         };
         using var process = Process.Start(startInfo);
         if (process == null)
@@ -102,9 +179,26 @@ public static class AppInstaller
         }
 
         process.WaitForExit();
+        var stdOut = process.StandardOutput.ReadToEnd();
+        var stdErr = process.StandardError.ReadToEnd();
+        if (!string.IsNullOrWhiteSpace(stdOut))
+        {
+            Logger.Log($"mklink output: {stdOut}");
+        }
+        if (!string.IsNullOrWhiteSpace(stdErr))
+        {
+            Logger.Log($"mklink error: {stdErr}");
+        }
         if (process.ExitCode != 0)
         {
-            var message = $"mklink exited with code {process.ExitCode}.";
+            var message = $"mklink exited with code {process.ExitCode}. {stdErr}".Trim();
+            Logger.Log(message);
+            return new JunctionResult(false, message);
+        }
+
+        if (!Directory.Exists(junctionPath))
+        {
+            var message = "mklink reported success but junction path was not created.";
             Logger.Log(message);
             return new JunctionResult(false, message);
         }

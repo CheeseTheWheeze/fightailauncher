@@ -114,6 +114,7 @@ public class UpdateService
         var updatesDir = Path.Combine(AppPaths.UpdatesDir(), version);
         Directory.CreateDirectory(updatesDir);
         var scriptPath = Path.Combine(updatesDir, "apply_update.cmd");
+        var logPath = Path.Combine(updatesDir, "update.log");
 
         var current = AppPaths.CurrentDir();
         var target = Path.Combine(AppPaths.VersionsDir(), version);
@@ -122,6 +123,7 @@ public class UpdateService
         var script = $@"@echo off
 setlocal
 set PID=%1
+echo %DATE% %TIME% Starting update > ""{logPath}""
 :wait
 tasklist /FI ""PID eq %PID%"" | find ""%PID%"" >nul
 if %errorlevel%==0 (
@@ -129,9 +131,13 @@ if %errorlevel%==0 (
   goto wait
 )
 if exist ""{current}"" (
-  rmdir ""{current}""
+  rmdir /S /Q ""{current}""
 )
 mklink /J ""{current}"" ""{target}""
+if %errorlevel% neq 0 (
+  echo mklink failed with %errorlevel% >> ""{logPath}""
+  exit /b 1
+)
 start """" ""{appExe}""
 ";
 

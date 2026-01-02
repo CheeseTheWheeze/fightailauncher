@@ -7,6 +7,7 @@ import time
 import traceback
 import uuid
 from pathlib import Path
+from types import SimpleNamespace
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -22,6 +23,7 @@ from engine.result_contract import (  # noqa: E402
     write_result_ok,
 )
 from shared.storage_paths import (  # noqa: E402
+    RunPaths,
     ensure_global_dirs,
     ensure_run_dirs,
     get_global_paths,
@@ -59,18 +61,20 @@ def read_version() -> str:
 
 
 def resolve_outputs_logs(run_id: str, args: argparse.Namespace):
-    run_paths = get_run_paths(run_id)
+    if args.outdir:
+        run_dir = Path(args.outdir)
+        run_paths = RunPaths(
+            base_dir=run_dir,
+            run_dir=run_dir,
+            input_dir=run_dir / "input",
+            outputs_dir=run_dir / "outputs",
+            logs_dir=run_dir / "logs",
+        )
+    else:
+        run_paths = get_run_paths(run_id)
     ensure_run_dirs(run_paths)
 
-    outputs_dir = Path(args.outdir) if args.outdir else run_paths.outputs_dir
-    outputs_dir.mkdir(parents=True, exist_ok=True)
-
-    logs_dir = run_paths.logs_dir
-    if args.outdir:
-        logs_dir = Path(args.outdir).parent / "logs"
-    logs_dir.mkdir(parents=True, exist_ok=True)
-
-    return run_paths, outputs_dir, logs_dir
+    return run_paths, run_paths.outputs_dir, run_paths.logs_dir
 
 
 def analyze(args: argparse.Namespace) -> int:
@@ -137,6 +141,8 @@ def analyze(args: argparse.Namespace) -> int:
             logger,
             primary_tracks=args.primary_tracks,
             model_path=args.model,
+            num_poses=args.num_poses,
+            crop_refine=args.crop_refine,
         )
         overlay_result = render_overlay(video_path, outputs_dir, logger)
         result["outputs"]["pose_json"] = _relative_to(outputs_dir, pose_result["pose_path"])
@@ -168,7 +174,11 @@ def analyze(args: argparse.Namespace) -> int:
         exit_code = 0
         logger.info("Analysis completed successfully.")
     except KnownError as exc:
+        stack = traceback.format_exc()
         write_result_error(result, exc.code, exc.message, exc.hint)
+        result["error"]["traceback"] = stack
+        result["error_code"] = exc.code
+        result["message"] = exc.message
         exit_code = 2
         logger.error("Handled error: %s (%s)", exc.message, exc.code)
     except Exception as exc:
@@ -183,6 +193,9 @@ def analyze(args: argparse.Namespace) -> int:
             "exception": f"{type(exc).__name__}: {exc}",
             "stack": stack,
         }
+        result["error"]["traceback"] = stack
+        result["error_code"] = "E_UNEXPECTED"
+        result["message"] = "Unexpected engine crash."
         exit_code = 3
         logger.exception("Unexpected error")
     finally:
@@ -210,8 +223,56 @@ def _flush_logger(logger: logging.Logger) -> None:
         logger.removeHandler(handler)
 
 
+def _peek_arg_value(argv: list[str], name: str) -> str | None:
+    prefix = f"{name}="
+    for idx, arg in enumerate(argv):
+        if arg == name and idx + 1 < len(argv):
+            return argv[idx + 1]
+        if arg.startswith(prefix):
+            return arg.split("=", 1)[1]
+    return None
+
+
+def _build_base_result(run_id: str, outputs_dir: Path, logs_dir: Path) -> dict:
+    return {
+        "status": ResultStatus.ERROR,
+        "run_id": run_id,
+        "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "version": read_version(),
+        "inputs": {
+            "run_id": run_id,
+        },
+        "outputs": {
+            "result_json": "result.json",
+            "error_json": "error.json",
+            "outputs_dir": str(outputs_dir),
+        },
+        "logs": {
+            "engine_log": "engine.log",
+            "logs_dir": str(logs_dir),
+        },
+        "warnings": [],
+    }
+
+
+def _write_error_contract(result: dict, outputs_dir: Path, logger: logging.Logger) -> None:
+    result["finished_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    safe_write_json(outputs_dir / "result.json", result)
+    if result.get("error"):
+        safe_write_json(outputs_dir / "error.json", result["error"])
+    _flush_logger(logger)
+
+
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Fighting Overlay Engine")
+    argv = sys.argv[1:]
+    run_id = _peek_arg_value(argv, "--run-id") or uuid.uuid4().hex
+    outdir = _peek_arg_value(argv, "--outdir")
+    run_paths, outputs_dir, logs_dir = resolve_outputs_logs(run_id, SimpleNamespace(outdir=outdir))
+    engine_log = logs_dir / "engine.log"
+    engine_log.touch(exist_ok=True)
+    logger = setup_logging(engine_log)
+
+    parser = argparse.ArgumentParser(description="Fighting Overlay Engine", exit_on_error=False)
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     analyze_parser = subparsers.add_parser("analyze", help="Analyze a video")
@@ -220,12 +281,52 @@ def main() -> int:
     analyze_parser.add_argument("--outdir", required=False)
     analyze_parser.add_argument("--model", required=False)
     analyze_parser.add_argument("--primary-tracks", type=int, default=2)
+    analyze_parser.add_argument("--num-poses", type=int, default=4)
+    analyze_parser.add_argument(
+        "--crop-refine",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Enable or disable crop refinement for small detections.",
+    )
 
-    args = parser.parse_args()
+    try:
+        args = parser.parse_args(argv)
+    except argparse.ArgumentError as exc:
+        message = str(exc)
+        stack = traceback.format_exc()
+        result = _build_base_result(run_id, outputs_dir, logs_dir)
+        write_result_error(result, "E_ARGPARSE", "Invalid arguments.", message)
+        result["error"]["traceback"] = stack
+        result["error_code"] = "E_ARGPARSE"
+        result["message"] = "Invalid arguments."
+        logger.error("Argparse failure: %s", message)
+        _write_error_contract(result, outputs_dir, logger)
+        return 2
+    except SystemExit as exc:
+        message = str(exc)
+        stack = traceback.format_exc()
+        result = _build_base_result(run_id, outputs_dir, logs_dir)
+        write_result_error(result, "E_ARGPARSE", "Invalid arguments.", message)
+        result["error"]["traceback"] = stack
+        result["error_code"] = "E_ARGPARSE"
+        result["message"] = "Invalid arguments."
+        logger.error("Argparse exit: %s", message)
+        _write_error_contract(result, outputs_dir, logger)
+        return 2
+
+    if not args.run_id:
+        args.run_id = run_id
 
     if args.command == "analyze":
         return analyze(args)
-    raise SystemExit("Unknown command.")
+    result = _build_base_result(run_id, outputs_dir, logs_dir)
+    write_result_error(result, "E_COMMAND", "Unknown command.", f"Unknown command: {args.command}")
+    result["error"]["traceback"] = ""
+    result["error_code"] = "E_COMMAND"
+    result["message"] = "Unknown command."
+    logger.error("Unknown command: %s", args.command)
+    _write_error_contract(result, outputs_dir, logger)
+    return 2
 
 
 if __name__ == "__main__":

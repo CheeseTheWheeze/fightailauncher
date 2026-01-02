@@ -1,6 +1,8 @@
 import importlib
 import importlib.util
 import json
+import os
+import sys
 import time
 from pathlib import Path
 
@@ -22,7 +24,15 @@ HEIGHT_WINDOW = 30
 ASSIGNMENT_THRESHOLD = 2.5
 
 
-def extract_pose(video_path: Path, outputs_dir: Path, logger, primary_tracks: int = 2, model_path: str | None = None) -> dict:
+def extract_pose(
+    video_path: Path,
+    outputs_dir: Path,
+    logger,
+    primary_tracks: int = 2,
+    model_path: str | None = None,
+    num_poses: int = NUM_POSES,
+    crop_refine: bool = True,
+) -> dict:
     pose_path = outputs_dir / "pose.json"
     pose_raw_path = outputs_dir / "pose_raw.json"
     started = time.time()
@@ -46,12 +56,13 @@ def extract_pose(video_path: Path, outputs_dir: Path, logger, primary_tracks: in
     mp_python = importlib.import_module("mediapipe.tasks.python")
     vision = importlib.import_module("mediapipe.tasks.python.vision")
 
-    model_asset = _resolve_model_path(model_path, mp, logger)
+    model_asset = resolve_pose_model_path(model_path, logger)
+    pose_count = max(1, num_poses)
     base_options = mp_python.BaseOptions(model_asset_path=str(model_asset))
     options_video = vision.PoseLandmarkerOptions(
         base_options=base_options,
         running_mode=vision.RunningMode.VIDEO,
-        num_poses=NUM_POSES,
+        num_poses=pose_count,
         min_pose_detection_confidence=0.5,
         min_pose_presence_confidence=0.5,
         min_tracking_confidence=0.5,
@@ -118,15 +129,16 @@ def extract_pose(video_path: Path, outputs_dir: Path, logger, primary_tracks: in
 
         tracker.update_tracks(detections, frame_index)
 
-        _refine_primary_tracks(
-            tracker,
-            landmarker_image,
-            frame,
-            landmark_names,
-            width,
-            height,
-            frame_index,
-        )
+        if crop_refine:
+            _refine_primary_tracks(
+                tracker,
+                landmarker_image,
+                frame,
+                landmark_names,
+                width,
+                height,
+                frame_index,
+            )
 
         frame_tracks = tracker.build_primary_frame(frame_index, timestamp_ms)
         frames.append(
@@ -202,7 +214,7 @@ def extract_pose(video_path: Path, outputs_dir: Path, logger, primary_tracks: in
     }
 
 
-def _resolve_model_path(model_path: str | None, mp_module, logger) -> Path:
+def resolve_pose_model_path(model_path: str | None, logger) -> Path:
     if model_path:
         candidate = Path(model_path)
         if candidate.exists():
@@ -213,21 +225,41 @@ def _resolve_model_path(model_path: str | None, mp_module, logger) -> Path:
             f"Provided model path does not exist: {candidate}",
         )
 
-    mp_root = Path(mp_module.__file__).resolve().parent
-    candidates = [
-        mp_root / "modules" / "pose_landmarker" / "pose_landmarker_heavy.task",
-        mp_root / "modules" / "pose_landmarker" / "pose_landmarker_full.task",
-        mp_root / "modules" / "pose_landmarker" / "pose_landmarker_lite.task",
-    ]
+    env_model = os.environ.get("FIGHTAI_POSE_MODEL")
+    if env_model:
+        candidate = Path(env_model)
+        if candidate.exists():
+            return candidate
+        raise KnownError(
+            "E_MODEL_MISSING",
+            "Pose landmarker model not found.",
+            f"FIGHTAI_POSE_MODEL does not exist: {candidate}",
+        )
+
+    candidates: list[Path] = []
+    exe_dir = Path(sys.executable).resolve().parent
+    candidates.append(exe_dir / "models" / "pose_landmarker_full.task")
+    candidates.append(exe_dir / "models" / "pose_landmarker_lite.task")
+
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        meipass_dir = Path(meipass)
+        candidates.append(meipass_dir / "models" / "pose_landmarker_full.task")
+        candidates.append(meipass_dir / "models" / "pose_landmarker_lite.task")
+
+    repo_models = Path(__file__).resolve().parent / "models"
+    candidates.append(repo_models / "pose_landmarker_full.task")
+    candidates.append(repo_models / "pose_landmarker_lite.task")
+
     for candidate in candidates:
         if candidate.exists():
             return candidate
 
-    logger.error("Pose landmarker model not found in mediapipe package.")
+    logger.error("Pose landmarker model not found in engine bundle.")
     raise KnownError(
         "E_MODEL_MISSING",
         "Pose landmarker model not found.",
-        "Bundle pose_landmarker_full.task (or lite/heavy) and pass --model to the engine.",
+        "Bundle pose_landmarker_full.task (or lite) and pass --model to the engine.",
     )
 
 

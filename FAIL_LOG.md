@@ -31,3 +31,9 @@ Track recurring failures and mitigations to avoid regressions.
 - **Root cause:** Single-person pose + no per-person tracking; wide shots reduce detection.
 - **Fix:** Multi-pose landmarker + per-person tracking IDs + size gating + crop-and-rescale for small subjects.
 - **Prevention:** Metrics per track; require two primary tracks when two large subjects present.
+
+## 2026-01-02
+- **Symptom:** Windows CI smoke test failed with E_MODEL_MISSING; engine log/result not written when CLI args were invalid.
+- **Root cause:** Pose landmarker model was not bundled into the ZIP artifact, and argparse exited before logging/output setup.
+- **Fix:** Commit the pose landmarker model under `engine/models`, bundle it into PyInstaller/ZIP, add CI guardrails, and initialize outputs/logging before argument parsing.
+- **Prevention:** Workflow checks for `dist/engine/models/pose_landmarker_full.task`; smoke test covers invalid-arg contract outputs.

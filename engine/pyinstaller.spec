@@ -19,6 +19,10 @@ datas += mp_datas
 binaries += mp_binaries
 hiddenimports += mp_hidden
 
+model_path = repo_root / "engine" / "models" / "pose_landmarker_full.task"
+if model_path.exists():
+    datas.append((str(model_path), "models"))
+
 a = Analysis(
     [str(repo_root / "engine" / "run_engine.py")],
     pathex=[str(repo_root)],

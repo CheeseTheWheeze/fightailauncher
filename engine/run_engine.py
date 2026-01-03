@@ -288,6 +288,7 @@ def main() -> int:
         default=True,
         help="Enable or disable crop refinement for small detections.",
     )
+    subparsers.add_parser("version", help="Print engine version and exit")
 
     try:
         args = parser.parse_args(argv)
@@ -319,6 +320,11 @@ def main() -> int:
 
     if args.command == "analyze":
         return analyze(args)
+    if args.command == "version":
+        logger.info("Engine version requested.")
+        print(read_version())
+        _flush_logger(logger)
+        return 0
     result = _build_base_result(run_id, outputs_dir, logs_dir)
     write_result_error(result, "E_COMMAND", "Unknown command.", f"Unknown command: {args.command}")
     result["error"]["traceback"] = ""

@@ -1,5 +1,6 @@
 param(
-    [string]$EnginePath
+    [string]$EnginePath,
+    [string]$ModelPath
 )
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
@@ -38,7 +39,14 @@ try {
     $runRoot = Join-Path $tempRoot "run"
     $outputDir = Join-Path $runRoot "outputs"
     $logDir = Join-Path $runRoot "logs"
-    $modelPath = Join-Path (Split-Path $EnginePath -Parent) "models" "pose_landmarker_full.task"
+    if (-not $ModelPath) {
+        $ModelPath = Join-Path (Split-Path $EnginePath -Parent) "models" "pose_landmarker_full.task"
+    }
+    $modelPath = $ModelPath
+    if (-not (Test-Path $modelPath)) {
+        Write-Error "Model not found at $modelPath"
+        exit 1
+    }
 
     $resultJson = Join-Path $outputDir "result.json"
     $engineLog = Join-Path $logDir "engine.log"

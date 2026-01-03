@@ -33,7 +33,7 @@ Track recurring failures and mitigations to avoid regressions.
 - **Prevention:** Metrics per track; require two primary tracks when two large subjects present.
 
 ## 2026-01-02
-- **Symptom:** Windows CI smoke test failed with E_MODEL_MISSING; engine log/result not written when CLI args were invalid.
-- **Root cause:** Pose landmarker model was not bundled into the ZIP artifact, and argparse exited before logging/output setup.
-- **Fix:** Commit the pose landmarker model under `engine/models`, bundle it into PyInstaller/ZIP, add CI guardrails, and initialize outputs/logging before argument parsing.
-- **Prevention:** Workflow checks for `dist/engine/models/pose_landmarker_full.task`; smoke test covers invalid-arg contract outputs.
+- **Symptom:** Windows CI failed with “Model directory missing” / `E_MODEL_MISSING`.
+- **Root cause:** Pose landmarker model was not copied into `dist/engine/models`, so the packaged engine could not resolve the model.
+- **Fix:** Bundle the pose landmarker model under `engine/models`, copy it into `dist/engine/models` during packaging, and pass the model path in smoke tests.
+- **Prevention:** Workflow verifies `.task` models exist and smoke tests enforce result/log outputs for invalid args.

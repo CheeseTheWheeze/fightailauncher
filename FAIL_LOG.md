@@ -37,3 +37,9 @@ Track recurring failures and mitigations to avoid regressions.
 - **Root cause:** Pose landmarker model was not copied into `dist/engine/models`, so the packaged engine could not resolve the model.
 - **Fix:** Bundle the pose landmarker model under `engine/models`, copy it into `dist/engine/models` during packaging, and pass the model path in smoke tests.
 - **Prevention:** Workflow verifies `.task` models exist and smoke tests enforce result/log outputs for invalid args.
+
+## 2026-01-05
+- **Symptom:** Windows CI intermittently failed during build/package; release zips missing engine assets or used the wrong publish path.
+- **Root cause:** LFS model files were sometimes checked out as pointer text, and packaging depended on SDK-version-specific publish paths.
+- **Fix:** Enable LFS + full git history in CI, validate `pose_landmarker_full.task` is a real binary, and publish desktop output to `dist/desktop_publish`.
+- **Prevention:** Add explicit engine/desktop/package assertions, validate release layout before zipping, and always upload diagnostics artifacts.

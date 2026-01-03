@@ -1,6 +1,8 @@
 param(
     [string]$EnginePath,
-    [string]$ModelPath
+    [string]$ModelPath,
+    [string]$OutputRoot,
+    [switch]$KeepTemp
 )
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
@@ -13,7 +15,11 @@ if (-not (Test-Path $EnginePath)) {
     exit 1
 }
 
-$tempRoot = Join-Path $env:TEMP ("fight-overlay-smoke-" + [Guid]::NewGuid().ToString("N"))
+$baseRoot = if ($OutputRoot) { $OutputRoot } else { $env:TEMP }
+if ($OutputRoot -and -not (Test-Path $baseRoot)) {
+    New-Item -ItemType Directory -Force -Path $baseRoot | Out-Null
+}
+$tempRoot = Join-Path $baseRoot ("fight-overlay-smoke-" + [Guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Force -Path $tempRoot | Out-Null
 
 try {
@@ -167,8 +173,22 @@ try {
         exit 1
     }
 
+    $versionOutput = & $EnginePath version
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Engine version command exited with $LASTEXITCODE"
+        exit 1
+    }
+    if (-not $versionOutput) {
+        Write-Error "Engine version command returned empty output"
+        exit 1
+    }
+
     Write-Host "Smoke test passed."
     exit 0
 } finally {
-    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $tempRoot
+    if ($KeepTemp) {
+        Write-Host "Preserving smoke test artifacts at $tempRoot"
+    } else {
+        Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $tempRoot
+    }
 }

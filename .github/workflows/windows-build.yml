@@ -33,6 +33,18 @@ jobs:
       - name: Build engine
         run: powershell -File scripts/build_engine.ps1
 
+      - name: Stage pose models
+        run: |
+          $modelSource = Join-Path $env:GITHUB_WORKSPACE "engine/models"
+          $modelDir = Join-Path $env:GITHUB_WORKSPACE "dist/engine/models"
+          New-Item -ItemType Directory -Force -Path $modelDir | Out-Null
+          $modelFiles = Get-ChildItem -Path $modelSource -Filter "*.task"
+          if (-not $modelFiles) {
+            Write-Error "No pose models found in $modelSource"
+            exit 1
+          }
+          Copy-Item -Force $modelFiles $modelDir
+
       - name: Verify pose model bundled
         run: |
           $modelDir = Join-Path $env:GITHUB_WORKSPACE "dist/engine/models"
@@ -40,7 +52,14 @@ jobs:
             Write-Error "Model directory missing at $modelDir"
             exit 1
           }
-          Get-ChildItem -Path $modelDir
+          $models = Get-ChildItem -Path $modelDir -Filter "*.task"
+          if (-not $models) {
+            Write-Error "No .task models found in $modelDir"
+            exit 1
+          }
+          if ($models.Count -gt 1) {
+            Write-Warning ("Multiple pose models detected: {0}. Defaulting to full model." -f ($models.Name -join ", "))
+          }
           $modelPath = Join-Path $modelDir "pose_landmarker_full.task"
           if (-not (Test-Path $modelPath)) {
             Write-Error "pose_landmarker_full.task missing in dist/engine/models"
@@ -51,7 +70,7 @@ jobs:
         run: dotnet publish apps/desktop/FightingOverlay.Desktop.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
 
       - name: Smoke test engine
-        run: powershell -File scripts/smoke_test.ps1 -EnginePath dist/engine/engine.exe
+        run: powershell -File scripts/smoke_test.ps1 -EnginePath dist/engine/engine.exe -ModelPath dist/engine/models/pose_landmarker_full.task
 
       - name: Compute version
         id: version

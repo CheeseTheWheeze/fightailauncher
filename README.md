@@ -25,12 +25,19 @@ scripts\dev_run.ps1
 
 ## Engine CLI
 ```powershell
-engine\dist\engine\engine.exe analyze --video "C:\path\video.mp4" --athlete "athlete_id" --clip "clip_id"
+engine\dist\engine\engine.exe analyze --video "C:\path\video.mp4" --run-id "run-001" --outdir "C:\path\run" --model "C:\path\pose_landmarker_full.task"
 ```
 
 ```powershell
-python engine\run_engine.py analyze --video "C:\path\video.mp4" --athlete "athlete_id" --clip "clip_id"
+python engine\run_engine.py analyze --video "C:\path\video.mp4" --run-id "run-001" --outdir "C:\path\run" --model "engine\models\pose_landmarker_full.task"
 ```
+
+### Pose model resolution
+The engine resolves the pose landmarker model in this order:
+1. `--model` CLI argument
+2. `FIGHTAI_POSE_MODEL` environment variable
+3. Bundled `engine/models/pose_landmarker_full.task` (or lite) in the packaged exe
+4. Repository fallback at `engine/models/pose_landmarker_full.task`
 
 ## Logs & Storage
 Data is stored under `%LOCALAPPDATA%\FightingOverlay\data`.
